@@ -70,13 +70,27 @@ type DailyPersist = { d: string; s: number; streak: number; streakDay: string }
 
 function ColorPicker({ onChange }: { onChange: (c: Color) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const hueBarRef = useRef<HTMLDivElement>(null)
   const [hue, setHue] = useState(0)
   const [sv, setSv] = useState({ s: 0.5, v: 0.5 })
+  const svRef = useRef(sv)
+  svRef.current = sv
   const dragging = useRef(false)
 
   const update = useCallback((s: number, v: number, h: number) => {
     onChange(hsvToRgb(h, s, v))
   }, [onChange])
+
+  const applyHueClientX = useCallback((clientX: number) => {
+    const el = hueBarRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    const h = Math.round(x * 360)
+    const { s, v } = svRef.current
+    setHue(h)
+    update(s, v, h)
+  }, [update])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -112,17 +126,32 @@ function ColorPicker({ onChange }: { onChange: (c: Color) => void }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
       <div
+        ref={hueBarRef}
         style={{
-          height: 20, borderRadius: 10, border: '0.5px solid var(--border)',
+          height: 20,
+          borderRadius: 10,
+          border: '0.5px solid var(--border)',
           background: 'linear-gradient(to right, hsl(0,100%,50%), hsl(30,100%,50%), hsl(60,100%,50%), hsl(90,100%,50%), hsl(120,100%,50%), hsl(150,100%,50%), hsl(180,100%,50%), hsl(210,100%,50%), hsl(240,100%,50%), hsl(270,100%,50%), hsl(300,100%,50%), hsl(330,100%,50%), hsl(360,100%,50%))',
-          position: 'relative', cursor: 'pointer',
+          position: 'relative',
+          cursor: 'pointer',
+          touchAction: 'none',
         }}
-        onClick={e => {
-          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
-          const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-          const h = Math.round(x * 360)
-          setHue(h)
-          update(sv.s, sv.v, h)
+        onPointerDown={(e) => {
+          if (e.pointerType === 'mouse' && e.button !== 0) return
+          ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
+          applyHueClientX(e.clientX)
+        }}
+        onPointerMove={(e) => {
+          if (!(e.currentTarget as HTMLDivElement).hasPointerCapture(e.pointerId)) return
+          applyHueClientX(e.clientX)
+        }}
+        onPointerUp={(e) => {
+          const el = e.currentTarget as HTMLDivElement
+          if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
+        }}
+        onPointerCancel={(e) => {
+          const el = e.currentTarget as HTMLDivElement
+          if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
         }}
       >
         <div style={{
@@ -136,14 +165,27 @@ function ColorPicker({ onChange }: { onChange: (c: Color) => void }) {
       <div style={{ position: 'relative', width: '100%' }}>
         <canvas
           ref={canvasRef} width={520} height={364}
-          style={{ width: '100%', height: 260, borderRadius: 'var(--radius-md)', border: '0.5px solid var(--border)', cursor: 'crosshair', display: 'block' }}
+          style={{
+            width: '100%',
+            height: 260,
+            borderRadius: 'var(--radius-md)',
+            border: '0.5px solid var(--border)',
+            cursor: 'crosshair',
+            display: 'block',
+            touchAction: 'none',
+          }}
           onMouseDown={e => { dragging.current = true; handleCanvas(e) }}
           onMouseMove={e => { if (dragging.current) handleCanvas(e) }}
           onMouseUp={() => { dragging.current = false }}
           onMouseLeave={() => { dragging.current = false }}
           onTouchStart={e => { dragging.current = true; handleCanvas(e) }}
-          onTouchMove={e => { if (dragging.current) handleCanvas(e) }}
+          onTouchMove={(e) => {
+            if (!dragging.current) return
+            e.preventDefault()
+            handleCanvas(e)
+          }}
           onTouchEnd={() => { dragging.current = false }}
+          onTouchCancel={() => { dragging.current = false }}
         />
         <div style={{
           position: 'absolute', left: `calc(${sv.s * 100}% - 8px)`, top: `calc(${(1 - sv.v) * 100}% - 8px)`,
