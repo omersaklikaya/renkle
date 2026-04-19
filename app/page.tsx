@@ -1,66 +1,82 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+'use client'
+
+import { useState } from 'react'
+import NavBar from '@/components/NavBar'
+import GameCard from '@/components/GameCard'
+import StatsBar from '@/components/StatsBar'
+import { games, Lang } from '@/lib/games'
 
 export default function Home() {
+  const [lang, setLang] = useState<Lang>('tr')
+
+  const today = new Date()
+  const dateStr = today.toLocaleDateString(lang === 'tr' ? 'tr-TR' : 'en-US', {
+    day: 'numeric', month: 'long', year: 'numeric'
+  })
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div style={{
+      minHeight: '100vh',
+      background: 'var(--bg)',
+      display: 'flex',
+      flexDirection: 'column',
+    }}>
+      <NavBar lang={lang} onLangChange={setLang} streak={7} />
+
+      <div style={{ padding: 'var(--hero-padding)', textAlign: 'center' }}>
+        <div style={{
+          fontSize: 11,
+          color: 'var(--text-tertiary)',
+          letterSpacing: '0.08em',
+          marginBottom: 8
+        }}>
+          {dateStr}
+        </div>
+        <h1 style={{
+          fontSize: 24,
+          fontWeight: 500,
+          letterSpacing: '-0.4px',
+          marginBottom: 8
+        }}>
+          {lang === 'tr' ? 'Bugünün renk bulmacaları' : "Today's color puzzles"}
+        </h1>
+        <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+          {lang === 'tr'
+            ? 'Her gün yeni bulmacalar. Oyna, öğren, paylaş.'
+            : 'New puzzles every day. Play, learn, share.'}
+        </p>
+      </div>
+
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+        gap: 10,
+        padding: '0 var(--page-padding) var(--page-padding)',
+        alignItems: 'start',
+      }}>
+        {games.map((game) => (
+          <GameCard
+            key={game.slug}
+            slug={game.slug}
+            title={game.title[lang]}
+            description={game.description[lang]}
+            swatchColors={game.swatchColors}
+            tag={game.tag}
+            lang={lang}
+            locked={game.locked}
+          />
+        ))}
+      </div>
+
+      <div style={{ marginTop: 'auto' }}>
+        <StatsBar
+          played={3}
+          total={games.filter(g => !g.locked).length}
+          avgScore={84}
+          lang={lang}
+          onShare={() => alert(lang === 'tr' ? 'Yakında!' : 'Coming soon!')}
         />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </div>
     </div>
-  );
+  )
 }
