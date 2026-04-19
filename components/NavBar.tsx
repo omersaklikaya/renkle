@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import ThemeModeGlyph from '@/components/ThemeModeGlyph'
+import StreakFlameIcon from '@/components/StreakFlameIcon'
+import ThemeToggleButton from '@/components/ThemeToggleButton'
 
 interface NavBarProps {
   lang: 'tr' | 'en'
@@ -10,43 +10,42 @@ interface NavBarProps {
 }
 
 export default function NavBar({ lang, onLangChange, streak }: NavBarProps) {
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark')
-
+  const hasStreak = streak > 0
   return (
-    <nav style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: 'var(--nav-padding)',
-      borderBottom: '0.5px solid var(--border)',
-      background: 'var(--bg)',
-    }}>
+    <nav className="site-nav">
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{
-          width: 10, height: 10, borderRadius: '50%',
-          background: '#E24B4A', flexShrink: 0
-        }} />
-        <span style={{ fontSize: 18, fontWeight: 500, letterSpacing: '-0.3px' }}>
-          renkle
-        </span>
+        <div className="renkle-mark" aria-hidden />
+        <span style={{ fontSize: 18, fontWeight: 500, letterSpacing: '-0.3px' }}>renkle</span>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        {streak > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#639922' }} />
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-              {streak} {lang === 'tr' ? 'günlük seri' : 'day streak'}
-            </span>
-          </div>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              color: hasStreak ? '#ea580c' : 'var(--text-tertiary)',
+            }}
+          >
+            <StreakFlameIcon muted={!hasStreak} />
+          </span>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            {hasStreak
+              ? `${streak} ${lang === 'tr' ? 'günlük seri' : 'day streak'}`
+              : lang === 'tr'
+                ? 'henüz seriniz yok'
+                : 'no streak yet'}
+          </span>
+        </div>
 
-        <div style={{
-          display: 'flex',
-          border: '0.5px solid var(--border)',
-          borderRadius: 20,
-          overflow: 'hidden',
-        }}>
+        <div
+          style={{
+            display: 'flex',
+            border: '0.5px solid var(--border)',
+            borderRadius: 20,
+            overflow: 'hidden',
+          }}
+        >
           {(['tr', 'en'] as const).map((l) => (
             <button
               key={l}
@@ -66,26 +65,7 @@ export default function NavBar({ lang, onLangChange, streak }: NavBarProps) {
           ))}
         </div>
 
-        <button
-          type="button"
-          onClick={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
-          aria-label={lang === 'tr' ? 'açık mod / koyu mod' : 'light or dark mode'}
-          title={lang === 'tr' ? 'açık mod / koyu mod' : 'light or dark mode'}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '6px 10px',
-            border: '0.5px solid var(--border)',
-            borderRadius: 20,
-            background: 'var(--bg-secondary)',
-            color: 'var(--text-primary)',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-          }}
-        >
-          <ThemeModeGlyph theme={theme} />
-        </button>
+        <ThemeToggleButton lang={lang} />
       </div>
     </nav>
   )

@@ -1,13 +1,28 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import NavBar from '@/components/NavBar'
 import GameCard from '@/components/GameCard'
-import StatsBar from '@/components/StatsBar'
 import { games, Lang } from '@/lib/games'
+import { LS_RENGI_DAILY, readRengiDailyStreak } from '@/lib/rengiDailyStreak'
 
 export default function Home() {
   const [lang, setLang] = useState<Lang>('tr')
+  const [dailyStreak, setDailyStreak] = useState(0)
+
+  useEffect(() => {
+    const sync = () => setDailyStreak(readRengiDailyStreak())
+    sync()
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === LS_RENGI_DAILY || e.key === null) sync()
+    }
+    window.addEventListener('storage', onStorage)
+    window.addEventListener('focus', sync)
+    return () => {
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener('focus', sync)
+    }
+  }, [])
 
   const today = new Date()
   const dateStr = today.toLocaleDateString(lang === 'tr' ? 'tr-TR' : 'en-US', {
@@ -21,7 +36,7 @@ export default function Home() {
       display: 'flex',
       flexDirection: 'column',
     }}>
-      <NavBar lang={lang} onLangChange={setLang} streak={7} />
+      <NavBar lang={lang} onLangChange={setLang} streak={dailyStreak} />
 
       <div style={{ padding: 'var(--hero-padding)', textAlign: 'center' }}>
         <div style={{
@@ -47,13 +62,12 @@ export default function Home() {
         </p>
       </div>
 
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-        gap: 10,
-        padding: '0 var(--page-padding) var(--page-padding)',
-        alignItems: 'start',
-      }}>
+      <div
+        className="home-game-grid"
+        style={{
+          padding: '0 var(--page-padding) var(--page-padding)',
+        }}
+      >
         {games.map((game) => (
           <GameCard
             key={game.slug}
@@ -66,16 +80,6 @@ export default function Home() {
             locked={game.locked}
           />
         ))}
-      </div>
-
-      <div style={{ marginTop: 'auto' }}>
-        <StatsBar
-          played={3}
-          total={games.filter(g => !g.locked).length}
-          avgScore={84}
-          lang={lang}
-          onShare={() => alert(lang === 'tr' ? 'Yakında!' : 'Coming soon!')}
-        />
       </div>
     </div>
   )

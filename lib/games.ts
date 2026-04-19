@@ -22,7 +22,7 @@ export const games: Game[] = [
     title: { tr: 'hangisi daha koyu?', en: 'which is darker?' },
     description: { tr: 'İki rengi karşılaştır, hızlı karar ver', en: 'Compare two colors, decide fast' },
     swatchColors: ['#E24B4A', '#888780', '#1D9E75', '#BA7517'],
-    tag: 'daily',
+    tag: 'new',
   },
   {
     slug: 'renk-karistir',
@@ -36,7 +36,7 @@ export const games: Game[] = [
     title: { tr: 'paleti tamamla', en: 'complete the palette' },
     description: { tr: 'Eksik rengi bul', en: 'Find the missing color' },
     swatchColors: ['#EF9F27', '#BA7517', '#412402'],
-    tag: 'daily',
+    tag: 'new',
   },
   {
     slug: 'marka-rengi-bil',
