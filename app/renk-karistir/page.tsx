@@ -12,46 +12,36 @@ import {
 } from '@/lib/gamePageStyles'
 import { copyToClipboard, generateShareText } from '@/lib/share'
 
-const LS_HANGISI_DAILY = 'renkle-hangisi-daily'
+const LS_RENK_DAILY = 'renkle-renk-karistir-daily'
 
 type Phase = 'menu' | 'playing' | 'result'
 type Mode = 'daily' | 'endless'
 
-interface Color {
-  r: number; g: number; b: number
+interface Color { r: number; g: number; b: number }
+
+const PAINT_COLORS: { color: Color; name: string; name_en: string }[] = [
+  { color: { r: 255, g: 0, b: 0 }, name: 'kırmızı', name_en: 'red' },
+  { color: { r: 0, g: 0, b: 255 }, name: 'mavi', name_en: 'blue' },
+  { color: { r: 255, g: 255, b: 0 }, name: 'sarı', name_en: 'yellow' },
+  { color: { r: 255, g: 255, b: 255 }, name: 'beyaz', name_en: 'white' },
+  { color: { r: 0, g: 0, b: 0 }, name: 'siyah', name_en: 'black' },
+  { color: { r: 165, g: 42, b: 42 }, name: 'kahve', name_en: 'brown' },
+]
+
+// Boya karıştırma mantığı — ağırlıklı ortalama
+function mixPaints(paints: Color[]): Color {
+  if (paints.length === 0) return { r: 255, g: 255, b: 255 }
+  const r = Math.round(paints.reduce((s, c) => s + c.r, 0) / paints.length)
+  const g = Math.round(paints.reduce((s, c) => s + c.g, 0) / paints.length)
+  const b = Math.round(paints.reduce((s, c) => s + c.b, 0) / paints.length)
+  return { r, g, b }
 }
 
 function colorToCss(c: Color) { return `rgb(${c.r},${c.g},${c.b})` }
 
-function getBrightness(c: Color) {
-  return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b
-}
-
-function randomColor(): Color {
-  return {
-    r: Math.floor(Math.random() * 256),
-    g: Math.floor(Math.random() * 256),
-    b: Math.floor(Math.random() * 256),
-  }
-}
-
-function generatePair(difficulty: 'kolay' | 'orta' | 'zor'): [Color, Color] {
-  const minDiff = difficulty === 'kolay' ? 80 : difficulty === 'orta' ? 40 : 15
-  const maxDiff = difficulty === 'kolay' ? 255 : difficulty === 'orta' ? 120 : 45
-
-  let a: Color, b: Color, diff: number
-  do {
-    a = randomColor()
-    b = randomColor()
-    diff = Math.abs(getBrightness(a) - getBrightness(b))
-  } while (diff < minDiff || diff > maxDiff)
-
-  return [a, b]
-}
-
-function getDailySeed() {
-  const d = new Date()
-  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()
+function calcSimilarity(a: Color, b: Color): number {
+  const dist = Math.sqrt((a.r-b.r)**2 + (a.g-b.g)**2 + (a.b-b.b)**2)
+  return Math.round((1 - dist / Math.sqrt(3*255**2)) * 100)
 }
 
 function seededRandom(seed: number) {
@@ -59,25 +49,25 @@ function seededRandom(seed: number) {
   return x - Math.floor(x)
 }
 
-function getDailyPairs(): [Color, Color][] {
-  const seed = getDailySeed()
-  const pairs: [Color, Color][] = []
-  for (let i = 0; i < 10; i++) {
-    const r1 = Math.floor(seededRandom(seed + i * 6) * 256)
-    const g1 = Math.floor(seededRandom(seed + i * 6 + 1) * 256)
-    const b1 = Math.floor(seededRandom(seed + i * 6 + 2) * 256)
-    const r2 = Math.floor(seededRandom(seed + i * 6 + 3) * 256)
-    const g2 = Math.floor(seededRandom(seed + i * 6 + 4) * 256)
-    const b2 = Math.floor(seededRandom(seed + i * 6 + 5) * 256)
-    pairs.push([
-      { r: r1, g: g1, b: b1 },
-      { r: r2, g: g2, b: b2 },
-    ])
+function getDailyTarget(index: number): Color {
+  const d = new Date()
+  const seed = d.getFullYear() * 10000 + (d.getMonth()+1) * 100 + d.getDate()
+  return {
+    r: Math.floor(seededRandom(seed + index * 3) * 256),
+    g: Math.floor(seededRandom(seed + index * 3 + 1) * 256),
+    b: Math.floor(seededRandom(seed + index * 3 + 2) * 256),
   }
-  return pairs
 }
 
-function HangisiDahaKoyuContent() {
+function getRandomTarget(): Color {
+  return {
+    r: Math.floor(Math.random() * 256),
+    g: Math.floor(Math.random() * 256),
+    b: Math.floor(Math.random() * 256),
+  }
+}
+
+function RenkKaristirContent() {
   const searchParams = useSearchParams()
   const modParam = searchParams.get('mod')
 
@@ -85,55 +75,27 @@ function HangisiDahaKoyuContent() {
   const [mode, setMode] = useState<Mode | null>(null)
   const [phase, setPhase] = useState<Phase>('menu')
   const [difficulty, setDifficulty] = useState<'kolay' | 'orta' | 'zor'>('orta')
-  const [pairs, setPairs] = useState<[Color, Color][]>([])
-  const [currentIndex, setCurrentIndex] = useState(0)
+  const [target, setTarget] = useState<Color>({ r: 128, g: 128, b: 128 })
+  const [addedPaints, setAddedPaints] = useState<Color[]>([])
+  const [lives, setLives] = useState(3)
   const [score, setScore] = useState(0)
-  const [streak, setStreak] = useState(0)
-  const [bestStreak, setBestStreak] = useState(0)
-  const [questionStart, setQuestionStart] = useState(0)
-  const [lastPoints, setLastPoints] = useState<number | null>(null)
-  const [showPoints, setShowPoints] = useState(false)
-  const [gameOver, setGameOver] = useState(false)
-  const [wrongColor, setWrongColor] = useState<'left' | 'right' | null>(null)
+  const [round, setRound] = useState(1)
+  const [totalRounds] = useState(5)
+  const [roundScore, setRoundScore] = useState<number | null>(null)
+  const [showResult, setShowResult] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [dailyPlayed, setDailyPlayed] = useState(false)
   const [dailyHydrated, setDailyHydrated] = useState(false)
   const dailySavedRef = useRef(false)
   const [copied, setCopied] = useState(false)
-  const [lives, setLives] = useState(3)
   const [answerAnim, setAnswerAnim] = useState<'correct' | 'wrong' | null>(null)
   const [displayScore, setDisplayScore] = useState(0)
 
   useEffect(() => { setTimeout(() => setMounted(true), 50) }, [])
 
-  const startGame = useCallback((m: Mode) => {
-    if (m === 'daily' && dailyPlayed) return
-    setMode(m)
-    setScore(0)
-    setStreak(0)
-    setCurrentIndex(0)
-    setGameOver(false)
-    setWrongColor(null)
-    setLastPoints(null)
-    setLives(m === 'endless' ? 3 : 1)
-
-    if (m === 'daily') {
-      setPairs(getDailyPairs())
-    } else {
-      const newPairs: [Color, Color][] = []
-      for (let i = 0; i < 100; i++) {
-        newPairs.push(generatePair(difficulty))
-      }
-      setPairs(newPairs)
-    }
-
-    setPhase('playing')
-    setQuestionStart(Date.now())
-  }, [dailyPlayed, difficulty])
-
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(LS_HANGISI_DAILY)
+      const raw = localStorage.getItem(LS_RENK_DAILY)
       if (raw) {
         const o = JSON.parse(raw) as { d?: string; score?: number; completed?: boolean }
         if (o.d === getLocalDayKey() && o.completed) {
@@ -143,6 +105,20 @@ function HangisiDahaKoyuContent() {
     } catch { /* ignore */ }
     setDailyHydrated(true)
   }, [])
+
+  const startGame = useCallback((m: Mode) => {
+    if (m === 'daily' && dailyPlayed) return
+    setMode(m)
+    setLives(3)
+    setScore(0)
+    setRound(1)
+    setAddedPaints([])
+    setShowResult(false)
+    setRoundScore(null)
+    setTarget(m === 'daily' ? getDailyTarget(0) : getRandomTarget())
+    setPhase('playing')
+    dailySavedRef.current = false
+  }, [dailyPlayed])
 
   useEffect(() => {
     if (!dailyHydrated) return
@@ -155,7 +131,7 @@ function HangisiDahaKoyuContent() {
     if (phase !== 'result' || mode !== 'daily' || dailySavedRef.current) return
     dailySavedRef.current = true
     try {
-      localStorage.setItem(LS_HANGISI_DAILY, JSON.stringify({
+      localStorage.setItem(LS_RENK_DAILY, JSON.stringify({
         d: getLocalDayKey(),
         score,
         completed: true,
@@ -183,100 +159,86 @@ function HangisiDahaKoyuContent() {
     return () => clearInterval(timer)
   }, [phase, score])
 
-  const currentPair = pairs[currentIndex]
+  const maxPaints = difficulty === 'kolay' ? 2 : difficulty === 'orta' ? 3 : 4
+  const mixed = mixPaints(addedPaints)
 
-  const handleChoice = (choice: 'left' | 'right') => {
-    if (!currentPair || gameOver) return
+  const addPaint = (color: Color) => {
+    if (addedPaints.length >= maxPaints) return
+    setAddedPaints(prev => [...prev, color])
+  }
 
-    const [left, right] = currentPair
-    const leftBrightness = getBrightness(left)
-    const rightBrightness = getBrightness(right)
-    const correctChoice = leftBrightness < rightBrightness ? 'left' : 'right'
+  const removeLast = () => {
+    setAddedPaints(prev => prev.slice(0, -1))
+  }
 
-    // eslint-disable-next-line react-hooks/purity -- tıklama anı
-    const elapsed = (Date.now() - questionStart) / 1000
-    const timeBonus = Math.max(0, Math.floor((3 - elapsed) * 10))
-    const basePoints = 100
-    const points = basePoints + timeBonus
+  const handleSubmit = () => {
+    const sim = calcSimilarity(mixed, target)
+    setAnswerAnim(sim >= 70 ? 'correct' : 'wrong')
+    setTimeout(() => setAnswerAnim(null), 600)
+    setRoundScore(sim)
+    setShowResult(true)
 
-    if (choice === correctChoice) {
-      setAnswerAnim('correct')
-      setTimeout(() => setAnswerAnim(null), 600)
-      setScore(s => s + points)
-      setStreak(s => {
-        const newStreak = s + 1
-        if (newStreak > bestStreak) setBestStreak(newStreak)
-        return newStreak
-      })
-      setLastPoints(points)
-      setShowPoints(true)
-      setTimeout(() => setShowPoints(false), 800)
-
-      if (mode === 'daily' && currentIndex >= 9) {
-        setPhase('result')
+    if (sim < 70) {
+      const newLives = lives - 1
+      setLives(newLives)
+      if (newLives <= 0) {
+        setTimeout(() => setPhase('result'), 1200)
         return
       }
-
-      setCurrentIndex(i => i + 1)
-      // eslint-disable-next-line react-hooks/purity -- soru başlangıcı
-      setQuestionStart(Date.now())
     } else {
-      setAnswerAnim('wrong')
-      setTimeout(() => setAnswerAnim(null), 600)
-      setWrongColor(choice)
+      setScore(s => s + sim)
+    }
+
+    if (round >= totalRounds) {
+      setTimeout(() => setPhase('result'), 1200)
+    } else {
       setTimeout(() => {
-        setWrongColor(null)
-        if (mode === 'daily') {
-          setGameOver(true)
-          setPhase('result')
-        } else {
-          setLives((prev) => {
-            const n = prev - 1
-            if (n <= 0) {
-              queueMicrotask(() => {
-                setGameOver(true)
-                setPhase('result')
-              })
-            }
-            return n
-          })
-        }
-      }, 600)
+        setRound(r => r + 1)
+        setAddedPaints([])
+        setShowResult(false)
+        setRoundScore(null)
+        setTarget(mode === 'daily'
+          ? getDailyTarget(round)
+          : getRandomTarget()
+        )
+      }, 1400)
     }
   }
 
   const t = {
     tr: {
-      title: 'hangisi daha koyu?',
-      desc: 'iki rengi karşılaştır, hızlı karar ver',
+      title: 'renk karıştır',
+      desc: 'boya karıştırarak hedef rengi yarat',
       daily: 'günlük', endless: 'sınırsız',
-      dailyDesc: '10 soru, herkes aynı renkler',
-      endlessDesc: 'ne kadar uzun tutabilirsin?',
-      question: 'hangisi daha koyu?',
-      score: 'puan', streak: 'seri', best: 'en iyi seri', lives: 'can',
+      dailyDesc: '5 tur, herkes aynı renkler',
+      endlessDesc: 'ne kadar yüksek skor yapabilirsin?',
+      target: 'hedef', mixed: 'karışımın',
+      submit: 'karıştır', undo: 'geri al',
+      lives: 'can', score: 'puan', round: 'tur',
       result: 'oyun bitti', totalScore: 'toplam puan',
       again: 'tekrar oyna', menu: 'mod seç',
+      add: 'ekle', maxReached: 'maksimum renk eklendi',
       kolay: 'kolay', orta: 'orta', zor: 'zor',
-      correct: 'doğru!', wrong: 'yanlış',
-      dailyComplete: 'günlük tamamlandı!',
-      alreadyDaily: 'bugün bu modu oynadın.',
+      perfect: 'mükemmel!', good: 'iyi!', bad: 'yanlış!',
       share: 'paylaş', copied: 'kopyalandı ✓',
+      alreadyDaily: 'bugün bu modu oynadın.',
     },
     en: {
-      title: 'which is darker?',
-      desc: 'compare two colors, decide fast',
+      title: 'mix colors',
+      desc: 'mix paints to recreate the target color',
       daily: 'daily', endless: 'endless',
-      dailyDesc: '10 questions, same colors for everyone',
-      endlessDesc: 'how long can you last?',
-      question: 'which is darker?',
-      score: 'score', streak: 'streak', best: 'best streak', lives: 'lives',
+      dailyDesc: '5 rounds, same colors for everyone',
+      endlessDesc: 'how high can you score?',
+      target: 'target', mixed: 'your mix',
+      submit: 'mix!', undo: 'undo',
+      lives: 'lives', score: 'score', round: 'round',
       result: 'game over', totalScore: 'total score',
       again: 'play again', menu: 'choose mode',
+      add: 'add', maxReached: 'max colors added',
       kolay: 'easy', orta: 'medium', zor: 'hard',
-      correct: 'correct!', wrong: 'wrong',
-      dailyComplete: 'daily complete!',
-      alreadyDaily: 'You already played today.',
+      perfect: 'perfect!', good: 'good!', bad: 'wrong!',
       share: 'share', copied: 'copied ✓',
+      alreadyDaily: 'You already played today.',
     },
   }[lang]
 
@@ -289,10 +251,10 @@ function HangisiDahaKoyuContent() {
   const handleShare = async () => {
     if (!mode) return
     const text = generateShareText(
-      'hangisi-daha-koyu',
+      'renk-karistir',
       mode,
       score,
-      { lang, streak: streak > 0 ? streak : undefined },
+      { lang, rounds: totalRounds },
     )
     const ok = await copyToClipboard(text)
     if (ok) {
@@ -339,7 +301,7 @@ function HangisiDahaKoyuContent() {
           }}
           >
             <p style={{ fontSize: 15, color: 'var(--text-primary)', marginBottom: 12 }}>{t.alreadyDaily}</p>
-            <Link href="/hangisi-daha-koyu?mod=sinirsiz" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+            <Link href="/renk-karistir?mod=sinirsiz" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
               {lang === 'tr' ? 'sınırsız moda geç →' : 'try endless mode →'}
             </Link>
           </div>
@@ -352,13 +314,36 @@ function HangisiDahaKoyuContent() {
         {phase === 'menu' && modParam !== 'gunluk' && (
           <div style={{ width: '100%', maxWidth: 440, margin: '0 auto' }}>
             <div style={{
-              height: 160, display: 'flex', overflow: 'hidden',
+              height: 160, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', gap: 12,
+              background: 'var(--bg-secondary)',
               borderRadius: 'var(--radius-lg)', marginBottom: 16,
             }}
             >
-              {['#1a1a2e', '#4a4a6a', '#8a8aaa', '#cacae0'].map((c, i) => (
-                <div key={i} style={{ flex: 1, background: c }} />
-              ))}
+              {[
+                { color: '#E24B4A', label: '' },
+                { color: '', label: '+' },
+                { color: '#378ADD', label: '' },
+                { color: '', label: '=' },
+                { color: '#8B3A8F', label: '' },
+              ].map((item, i) => {
+                if (item.color) {
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        width: 44, height: 44, borderRadius: '50%',
+                        background: item.color,
+                      }}
+                    />
+                  )
+                }
+                return (
+                  <span key={i} style={{ fontSize: 20, color: 'var(--text-tertiary)' }}>
+                    {item.label}
+                  </span>
+                )
+              })}
             </div>
 
             <div style={{ marginBottom: 12 }}>
@@ -467,9 +452,9 @@ function HangisiDahaKoyuContent() {
                   flex: 1,
                 }}
                 >
-                  <div style={{ fontSize: 26, fontWeight: 500, color: 'var(--text-primary)', letterSpacing: '-1px', marginBottom: 6, lineHeight: 1 }}>∞</div>
+                  <div style={{ fontSize: 26, fontWeight: 500, color: 'var(--text-primary)', letterSpacing: '-1px', marginBottom: 6, lineHeight: 1 }}>5</div>
                   <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-                    {lang === 'tr' ? 'sınırsız soru' : 'endless questions'}
+                    {lang === 'tr' ? 'tur' : 'rounds'}
                   </div>
                 </div>
                 <div style={{
@@ -481,12 +466,10 @@ function HangisiDahaKoyuContent() {
                 }}
                 >
                   <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, marginBottom: 10, height: 28 }}>
-                    {[40, 65, 100].map((h, i) => (
-                      <div key={i} style={{ width: 7, borderRadius: 2, background: '#EF9F27', height: `${h}%` }} />
-                    ))}
+                    <div style={{ width: '70%', height: 4, background: '#1D9E75', borderRadius: 2 }} />
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-                    {lang === 'tr' ? 'hızlı = bonus puan' : 'fast = bonus pts'}
+                    {lang === 'tr' ? '%70 geçme eşiği' : '70% threshold'}
                   </div>
                 </div>
               </div>
@@ -509,94 +492,182 @@ function HangisiDahaKoyuContent() {
         )}
 
         {/* PLAYING */}
-        {phase === 'playing' && currentPair && (
+        {phase === 'playing' && (
           <>
+            {/* Üst bar */}
             <div style={{
               display: 'flex', alignItems: 'center',
               justifyContent: 'space-between', width: '100%',
             }}>
-              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t.question}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                {mode === 'endless' && (
-                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                    {[0, 1, 2].map(i => (
-                      <div
-                        key={i}
-                        style={{
-                          width: 8, height: 8, borderRadius: '50%',
-                          background: i < lives ? '#E24B4A' : 'var(--bg-secondary)',
-                          border: '0.5px solid var(--border)',
-                        }}
-                      />
-                    ))}
-                    <span style={{ fontSize: 10, color: 'var(--text-tertiary)', marginLeft: 4 }}>{t.lives}</span>
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: 20 }}>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 18, fontWeight: 500 }}>{score}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{t.score}</div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 18, fontWeight: 500 }}>{streak}</div>
-                    <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{t.streak}</div>
-                  </div>
-                </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} style={{
+                    width: 8, height: 8, borderRadius: '50%',
+                    background: i < lives ? '#E24B4A' : 'var(--bg-secondary)',
+                    border: '0.5px solid var(--border)',
+                  }} />
+                ))}
               </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                {round}/{totalRounds}
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 500 }}>{score}</div>
             </div>
 
-            {mode === 'daily' && (
-              <div style={{
-                width: '100%', height: 3,
-                background: 'var(--bg-secondary)',
-                borderRadius: 2, overflow: 'hidden',
-              }}>
-                <div style={{
-                  height: '100%', borderRadius: 2,
-                  background: 'var(--text-secondary)',
-                  width: `${(currentIndex / 10) * 100}%`,
-                  transition: 'width 0.3s ease',
-                }} />
-              </div>
-            )}
-
+            {/* Hedef + Karışım yan yana */}
             <div style={{
-              display: 'flex', gap: 12, width: '100%', position: 'relative',
+              display: 'flex', gap: 10, width: '100%',
               animation: answerAnim === 'correct'
                 ? 'correctPulse 0.6s ease'
                 : answerAnim === 'wrong'
                   ? 'wrongShake 0.5s ease'
                   : 'none',
             }}>
-              {showPoints && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style={{
-                  position: 'absolute', top: -32, right: 0,
-                  fontSize: 14, fontWeight: 500, color: '#639922',
-                  animation: 'hangisiPointsBonus 0.8s ease forwards',
+                  height: 120, borderRadius: 'var(--radius-lg)',
+                  background: colorToCss(target),
+                  border: '0.5px solid var(--border)',
+                }} />
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', textAlign: 'center' }}>
+                  {t.target}
+                </div>
+              </div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{
+                  height: 120, borderRadius: 'var(--radius-lg)',
+                  background: addedPaints.length > 0
+                    ? colorToCss(mixed)
+                    : 'var(--bg-secondary)',
+                  border: '0.5px solid var(--border)',
+                  transition: 'background 0.2s ease',
+                  position: 'relative',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
-                  +{lastPoints}
+                  {addedPaints.length === 0 && (
+                    <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                      {lang === 'tr' ? 'renk ekle' : 'add colors'}
+                    </span>
+                  )}
+                  {showResult && roundScore !== null && (
+                    <div style={{
+                      position: 'absolute', inset: 0,
+                      background: 'rgba(0,0,0,0.5)',
+                      borderRadius: 'var(--radius-lg)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      flexDirection: 'column', gap: 4,
+                    }}>
+                      <div style={{
+                        fontSize: 28, fontWeight: 500,
+                        color: roundScore >= 90 ? '#a8e063'
+                          : roundScore >= 70 ? '#EF9F27'
+                          : '#E24B4A',
+                      }}>
+                        {roundScore}%
+                      </div>
+                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>
+                        {roundScore >= 90 ? t.perfect
+                          : roundScore >= 70 ? t.good
+                          : t.bad}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', textAlign: 'center' }}>
+                  {t.mixed}
+                </div>
+              </div>
+            </div>
+
+            {/* Eklenen boyalar */}
+            <div style={{
+              display: 'flex', gap: 6, width: '100%',
+              minHeight: 40, flexWrap: 'wrap',
+              alignItems: 'center',
+            }}>
+              {addedPaints.map((paint, i) => (
+                <div key={i} style={{
+                  width: 32, height: 32, borderRadius: '50%',
+                  background: colorToCss(paint),
+                  border: '0.5px solid var(--border)',
+                  flexShrink: 0,
+                }} />
+              ))}
+              {addedPaints.length < maxPaints && (
+                <div style={{
+                  fontSize: 10, color: 'var(--text-tertiary)',
+                  marginLeft: 4,
+                }}>
+                  {maxPaints - addedPaints.length} {lang === 'tr' ? 'renk daha' : 'more'}
                 </div>
               )}
-              {(['left', 'right'] as const).map((side) => {
-                const color = side === 'left' ? currentPair[0] : currentPair[1]
-                const isWrong = wrongColor === side
-                return (
-                  <div
-                    key={side}
-                    onClick={() => handleChoice(side)}
-                    style={{
-                      flex: 1, height: 260, borderRadius: 'var(--radius-lg)',
-                      background: colorToCss(color),
-                      cursor: gameOver ? 'default' : 'pointer',
-                      border: isWrong
-                        ? '3px solid #E24B4A'
-                        : '0.5px solid rgba(255,255,255,0.1)',
-                      transition: 'transform 0.15s ease, border 0.15s',
-                      transform: isWrong ? 'scale(0.97)' : 'scale(1)',
-                    }}
-                  />
-                )
-              })}
+            </div>
+
+            {/* Renk paleti */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: 8, width: '100%',
+            }}>
+              {PAINT_COLORS.map((pc, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => addPaint(pc.color)}
+                  disabled={addedPaints.length >= maxPaints || showResult}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 14px',
+                    minHeight: 44,
+                    border: '0.5px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'var(--bg-secondary)',
+                    cursor: addedPaints.length >= maxPaints ? 'not-allowed' : 'pointer',
+                    opacity: addedPaints.length >= maxPaints ? 0.4 : 1,
+                    transition: 'opacity 0.15s',
+                  }}
+                >
+                  <div style={{
+                    width: 20, height: 20, borderRadius: '50%',
+                    background: colorToCss(pc.color),
+                    border: '0.5px solid rgba(255,255,255,0.1)',
+                    flexShrink: 0,
+                  }} />
+                  <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>
+                    {lang === 'tr' ? pc.name : pc.name_en}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {/* Butonlar */}
+            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+              <button
+                type="button"
+                onClick={removeLast}
+                disabled={addedPaints.length === 0 || showResult}
+                style={{
+                  ...gameSecondaryButtonStyle,
+                  width: 'auto',
+                  padding: '13px 20px',
+                  opacity: addedPaints.length === 0 ? 0.4 : 1,
+                }}
+              >
+                {t.undo}
+              </button>
+              <button
+                className="btn-press"
+                type="button"
+                onClick={handleSubmit}
+                disabled={addedPaints.length === 0 || showResult}
+                style={{
+                  ...gamePrimaryButtonStyle,
+                  flex: 1,
+                  opacity: addedPaints.length === 0 ? 0.4 : 1,
+                }}
+              >
+                {t.submit}
+              </button>
             </div>
           </>
         )}
@@ -606,54 +677,21 @@ function HangisiDahaKoyuContent() {
           <>
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                {mode === 'daily' ? t.dailyComplete : t.result}
+                {t.result}
               </div>
               <div style={{
                 fontSize: 64, fontWeight: 500,
-                letterSpacing: '-2px', lineHeight: 1,
-                marginBottom: 4,
+                letterSpacing: '-2px', lineHeight: 1, marginBottom: 4,
                 color: score >= 90 ? '#a8e063' : score >= 70 ? '#EF9F27' : 'var(--text-primary)',
               }}>
                 {displayScore}
               </div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t.totalScore}</div>
-            </div>
-
-            {mode === 'endless' && (
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 4 }}>
-                {[0, 1, 2].map(i => (
-                  <div
-                    key={i}
-                    style={{
-                      width: 10, height: 10, borderRadius: '50%',
-                      background: i < lives ? '#E24B4A' : 'var(--bg-tertiary)',
-                      border: '0.5px solid var(--border)',
-                    }}
-                  />
-                ))}
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                {t.totalScore}
               </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
-              {[
-                { val: streak, lbl: t.streak },
-                { val: bestStreak, lbl: t.best },
-              ].map(({ val, lbl }) => (
-                <div key={lbl} style={{
-                  textAlign: 'center',
-                  padding: '16px 24px',
-                  border: '0.5px solid var(--border)',
-                  borderRadius: 'var(--radius-lg)',
-                  background: 'var(--bg-secondary)',
-                  minWidth: 100,
-                }}>
-                  <div style={{ fontSize: 24, fontWeight: 500, marginBottom: 4 }}>{val}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{lbl}</div>
-                </div>
-              ))}
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', marginTop: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', marginTop: 16 }}>
               <button
                 className="btn-press"
                 type="button"
@@ -694,7 +732,7 @@ function HangisiDahaKoyuContent() {
   )
 }
 
-export default function HangisiDahaKoyuPage() {
+export default function RenkKaristirPage() {
   return (
     <Suspense fallback={(
       <div style={{
@@ -713,7 +751,7 @@ export default function HangisiDahaKoyuPage() {
       </div>
     )}
     >
-      <HangisiDahaKoyuContent />
+      <RenkKaristirContent />
     </Suspense>
   )
 }

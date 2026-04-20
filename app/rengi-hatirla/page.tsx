@@ -1,19 +1,36 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { Suspense, useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import StreakFlameIcon from '@/components/StreakFlameIcon'
+import GameLayout from '@/components/GameLayout'
+import HowToPlay from '@/components/HowToPlay'
 import ThemeToggleButton from '@/components/ThemeToggleButton'
+import { saveDailyResult } from '@/lib/colorHistory'
+import {
+  gameContentWrapperStyle,
+  gamePrimaryButtonStyle,
+  gameSecondaryButtonStyle,
+} from '@/lib/gamePageStyles'
+import { generateShareText, copyToClipboard } from '@/lib/share'
+import { incrementStreak, readStreak } from '@/lib/streak'
 import {
   LS_RENGI_DAILY as LS_DAILY,
-  calendarDaysBetween,
   dayKey,
-  displayDailyStreakFromSaved,
 } from '@/lib/rengiDailyStreak'
+import { games } from '@/lib/games'
 
 type Phase = 'memorize' | 'guess' | 'result'
 type Mode = 'daily' | 'endless'
+type Difficulty = 'kolay' | 'orta' | 'zor'
+
 interface Color { r: number; g: number; b: number }
+
+const diffLabel = {
+  kolay: { tr: 'kolay', en: 'easy' },
+  orta: { tr: 'orta', en: 'medium' },
+  zor: { tr: 'zor', en: 'hard' },
+} as const
 
 function getDailyColor(): Color {
   const today = new Date()
@@ -26,8 +43,36 @@ function getDailyColor(): Color {
   }
 }
 
-function randomColor(): Color {
-  return { r: Math.floor(Math.random() * 256), g: Math.floor(Math.random() * 256), b: Math.floor(Math.random() * 256) }
+function randomColorByDifficulty(diff: Difficulty): Color {
+  if (diff === 'kolay') {
+    const presets = [
+      { r: 255, g: 0, b: 0 },
+      { r: 0, g: 255, b: 0 },
+      { r: 0, g: 0, b: 255 },
+      { r: 255, g: 255, b: 0 },
+      { r: 255, g: 0, b: 255 },
+      { r: 0, g: 255, b: 255 },
+      { r: 255, g: 128, b: 0 },
+      { r: 128, g: 0, b: 255 },
+    ]
+    return presets[Math.floor(Math.random() * presets.length)]
+  }
+
+  if (diff === 'orta') {
+    return {
+      r: Math.floor(Math.random() * 256),
+      g: Math.floor(Math.random() * 256),
+      b: Math.floor(Math.random() * 256),
+    }
+  }
+
+  const base = Math.floor(Math.random() * 256)
+  const variance = 40
+  return {
+    r: Math.min(255, Math.max(0, base + Math.floor((Math.random() - 0.5) * variance))),
+    g: Math.min(255, Math.max(0, base + Math.floor((Math.random() - 0.5) * variance))),
+    b: Math.min(255, Math.max(0, base + Math.floor((Math.random() - 0.5) * variance))),
+  }
 }
 
 function colorToHex(c: Color): string {
@@ -59,14 +104,62 @@ function getTimeUntilMidnight(): string {
 
 const LS_ENDLESS = 'renkle-rengi-hatirla-endless'
 
-/** Ezber: 5 sn geri sayım (50 ms adım), bitince otomatik tahmin. */
-const MEMORIZE_PREP_MS = 5000
+/** Ezber: 5 sn geri sayım, bitince otomatik tahmin. */
+const MEMORIZE_PREP_SECONDS_ENDLESS = 5
+const MEMORIZE_PREP_SECONDS_DAILY = 3
+const DAILY_ROUNDS = 5
 
-function formatMemorizeSeconds(ms: number): string {
-  return (Math.max(0, ms) / 1000).toFixed(2)
+function getDailyTargets(): Color[] {
+  const d = new Date()
+  const seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()
+  const pseudo = (n: number) => { const x = Math.sin(n) * 10000; return x - Math.floor(x) }
+  const difficulties = [120, 90, 60, 35, 15]
+  return difficulties.map((_, i) => ({
+    r: Math.floor(pseudo(seed + i * 10) * 256),
+    g: Math.floor(pseudo(seed + i * 10 + 1) * 256),
+    b: Math.floor(pseudo(seed + i * 10 + 2) * 256),
+  }))
 }
 
-type DailyPersist = { d: string; s: number; streak: number; streakDay: string }
+function getShareEmoji(score: number): string {
+  if (score >= 90) return '🟢'
+  if (score >= 70) return '🟡'
+  return '🔴'
+}
+
+function LockIconSmall({ muted }: { muted?: boolean }) {
+  const c = muted ? 'var(--text-tertiary)' : 'var(--text-secondary)'
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden style={{ opacity: 0.85 }}>
+      <path
+        d="M7 11V8a5 5 0 0110 0v3"
+        stroke={c}
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+      <rect x="5" y="11" width="14" height="10" rx="2" stroke={c} strokeWidth="1.75" />
+    </svg>
+  )
+}
+
+type DailyPersist = {
+  d: string
+  s?: number
+  score?: number
+  streak: number
+  streakDay?: string
+  targetColor?: Color
+  guessColor?: Color
+  scores?: number[]
+  targets?: Color[]
+  guesses?: Color[]
+}
+
+function isColor(value: unknown): value is Color {
+  if (!value || typeof value !== 'object') return false
+  const c = value as Partial<Color>
+  return typeof c.r === 'number' && typeof c.g === 'number' && typeof c.b === 'number'
+}
 
 function ColorPicker({ onChange }: { onChange: (c: Color) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -74,8 +167,11 @@ function ColorPicker({ onChange }: { onChange: (c: Color) => void }) {
   const [hue, setHue] = useState(0)
   const [sv, setSv] = useState({ s: 0.5, v: 0.5 })
   const svRef = useRef(sv)
-  svRef.current = sv
   const dragging = useRef(false)
+
+  useLayoutEffect(() => {
+    svRef.current = sv
+  }, [sv])
 
   const update = useCallback((s: number, v: number, h: number) => {
     onChange(hsvToRgb(h, s, v))
@@ -197,11 +293,16 @@ function ColorPicker({ onChange }: { onChange: (c: Color) => void }) {
   )
 }
 
-export default function RengiHatirla() {
+function RengiHatirlaContent() {
+  const searchParams = useSearchParams()
+  const modParam = searchParams.get('mod')
+
   const [lang, setLang] = useState<'tr' | 'en'>('tr')
+  const [showHelp, setShowHelp] = useState(false)
   const [mode, setMode] = useState<Mode | null>(null)
   const [phase, setPhase] = useState<Phase>('memorize')
-  const [target, setTarget] = useState<Color>(randomColor())
+  const [difficulty, setDifficulty] = useState<Difficulty>('orta')
+  const [target, setTarget] = useState<Color>(() => randomColorByDifficulty('orta'))
   const [guess, setGuess] = useState<Color>({ r: 128, g: 128, b: 128 })
   /** ColorPicker ilk etkileşimde onChange çağırır; öncesinde önizlemede gri yerine uyarı metni. */
   const [guessPicked, setGuessPicked] = useState(false)
@@ -211,40 +312,38 @@ export default function RengiHatirla() {
   const [endlessBest, setEndlessBest] = useState(0)
   const [countdown, setCountdown] = useState(getTimeUntilMidnight())
   const [dailyPlayed, setDailyPlayed] = useState(false)
+  const [dailyHydrated, setDailyHydrated] = useState(false)
   const [dailyScore, setDailyScore] = useState<number | null>(null)
-  const [dailyStreak, setDailyStreak] = useState(0)
+  const [dailyRound, setDailyRound] = useState(0)
+  const [dailyScores, setDailyScores] = useState<number[]>([])
+  const [dailyTargets, setDailyTargets] = useState<Color[]>([])
+  const [dailyGuesses, setDailyGuesses] = useState<Color[]>([])
   const [mounted, setMounted] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [statsHydrated, setStatsHydrated] = useState(false)
-  const [memorizePrepMsLeft, setMemorizePrepMsLeft] = useState(MEMORIZE_PREP_MS)
-  const [narrowViewport, setNarrowViewport] = useState(false)
+  const [timer, setTimer] = useState(MEMORIZE_PREP_SECONDS_ENDLESS)
+  const [answerAnim, setAnswerAnim] = useState<'correct' | 'wrong' | null>(null)
+  const [displayScore, setDisplayScore] = useState(0)
+  const dailyStreak = readStreak()
+  const memorizeTime = mode === 'daily' ? MEMORIZE_PREP_SECONDS_DAILY : MEMORIZE_PREP_SECONDS_ENDLESS
 
   useEffect(() => { setTimeout(() => setMounted(true), 50) }, [])
 
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 640px)')
-    const sync = () => setNarrowViewport(mq.matches)
-    sync()
-    mq.addEventListener('change', sync)
-    return () => mq.removeEventListener('change', sync)
-  }, [])
-
-  useEffect(() => {
     if (!mode || phase !== 'memorize') return undefined
-    setMemorizePrepMsLeft(MEMORIZE_PREP_MS)
+    queueMicrotask(() => setTimer(memorizeTime))
     const id = window.setInterval(() => {
-      setMemorizePrepMsLeft((prev) => {
-        if (prev <= 0) return 0
-        const next = Math.max(0, prev - 50)
-        if (next <= 0) {
+      setTimer((prev) => {
+        if (prev <= 1) {
           window.clearInterval(id)
           queueMicrotask(() => setPhase('guess'))
           return 0
         }
-        return next
+        return prev - 1
       })
-    }, 50)
+    }, 1000)
     return () => window.clearInterval(id)
-  }, [mode, phase])
+  }, [mode, phase, memorizeTime])
 
   useEffect(() => {
     const tick = () => {
@@ -255,14 +354,16 @@ export default function RengiHatirla() {
         if (!dailyRaw) {
           setDailyPlayed(false)
           setDailyScore(null)
-          setDailyStreak(0)
           return
         }
-        const parsed = JSON.parse(dailyRaw) as { d?: string; s?: number; streak?: number; streakDay?: string }
-        setDailyStreak(displayDailyStreakFromSaved(parsed, today))
-        if (parsed.d === today && typeof parsed.s === 'number') {
+        const parsed = JSON.parse(dailyRaw) as DailyPersist
+        const savedScore = typeof parsed.score === 'number' ? parsed.score : parsed.s
+        if (parsed.d === today && typeof savedScore === 'number') {
           setDailyPlayed(true)
-          setDailyScore(parsed.s)
+          setDailyScore(savedScore)
+          if (Array.isArray(parsed.scores)) setDailyScores(parsed.scores)
+          if (Array.isArray(parsed.targets)) setDailyTargets(parsed.targets)
+          if (Array.isArray(parsed.guesses)) setDailyGuesses(parsed.guesses)
         } else {
           setDailyPlayed(false)
           setDailyScore(null)
@@ -270,10 +371,10 @@ export default function RengiHatirla() {
       } catch {
         setDailyPlayed(false)
         setDailyScore(null)
-        setDailyStreak(0)
       }
     }
     tick()
+    setDailyHydrated(true)
     const timer = setInterval(tick, 1000)
     return () => clearInterval(timer)
   }, [])
@@ -322,76 +423,156 @@ export default function RengiHatirla() {
     } catch { /* ignore */ }
   }, [statsHydrated, endlessScores, endlessTargets, endlessBest])
 
-  const startMode = (m: Mode) => {
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [phase, mode])
+
+  useEffect(() => {
+    if (phase !== 'result' || similarity === null) return
+    const target = similarity
+    const duration = 1200
+    const steps = 60
+    const increment = target / steps
+    let current = 0
+    const timer = setInterval(() => {
+      current += increment
+      if (current >= target) {
+        setDisplayScore(target)
+        clearInterval(timer)
+      } else {
+        setDisplayScore(Math.floor(current))
+      }
+    }, duration / steps)
+    return () => clearInterval(timer)
+  }, [phase, similarity])
+
+  const startMode = useCallback((m: Mode) => {
     if (m === 'daily' && dailyPlayed) return
     setMode(m)
-    setTarget(m === 'daily' ? getDailyColor() : randomColor())
+    if (m === 'daily') {
+      const targets = getDailyTargets()
+      setDailyTargets(targets)
+      setTarget(targets[0])
+      setDailyRound(0)
+      setDailyScores([])
+      setDailyGuesses([])
+    } else {
+      setTarget(randomColorByDifficulty(difficulty))
+      setDailyTargets([])
+      setDailyRound(0)
+      setDailyScores([])
+      setDailyGuesses([])
+    }
     setGuess({ r: 128, g: 128, b: 128 })
     setGuessPicked(false)
     setSimilarity(null)
-    setMemorizePrepMsLeft(MEMORIZE_PREP_MS)
+    setTimer(m === 'daily' ? MEMORIZE_PREP_SECONDS_DAILY : MEMORIZE_PREP_SECONDS_ENDLESS)
     setPhase('memorize')
-  }
+  }, [dailyPlayed, difficulty])
+
+  useEffect(() => {
+    if (!dailyHydrated) return
+    if (modParam !== 'gunluk') return
+    try {
+      const raw = localStorage.getItem(LS_DAILY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as DailyPersist
+        const today = dayKey()
+        const savedScore = typeof parsed.score === 'number' ? parsed.score : parsed.s
+        if (parsed.d === today && typeof savedScore === 'number') {
+          setMode('daily')
+          setSimilarity(savedScore)
+          setDailyPlayed(true)
+          setDailyScore(savedScore)
+          if (Array.isArray(parsed.scores)) setDailyScores(parsed.scores)
+          if (Array.isArray(parsed.targets)) {
+            setDailyTargets(parsed.targets)
+            if (parsed.targets.length > 0 && isColor(parsed.targets[0])) setTarget(parsed.targets[0])
+          } else if (isColor(parsed.targetColor)) {
+            setTarget(parsed.targetColor)
+          }
+          if (Array.isArray(parsed.guesses)) {
+            setDailyGuesses(parsed.guesses)
+            if (parsed.guesses.length > 0 && isColor(parsed.guesses[parsed.guesses.length - 1])) {
+              setGuess(parsed.guesses[parsed.guesses.length - 1])
+              setGuessPicked(true)
+            }
+          } else if (isColor(parsed.guessColor)) {
+            setGuess(parsed.guessColor)
+            setGuessPicked(true)
+          }
+          setDailyRound(DAILY_ROUNDS - 1)
+          setPhase('result')
+          return
+        }
+      }
+    } catch {
+      // ignore and continue to start a new daily round
+    }
+    startMode('daily')
+  }, [dailyHydrated, modParam, startMode])
 
   const handleGuess = () => {
     const score = calcSimilarity(target, guess)
-    setSimilarity(score)
+    const isCorrect = score >= 70
+    setAnswerAnim(isCorrect ? 'correct' : 'wrong')
+    setTimeout(() => setAnswerAnim(null), 600)
     if (mode === 'endless') {
+      setSimilarity(score)
       setEndlessScores(prev => [...prev, score])
       setEndlessTargets(prev => [...prev, { r: target.r, g: target.g, b: target.b }])
       setEndlessBest(prev => Math.max(prev, score))
+      setPhase('result')
     }
     if (mode === 'daily') {
-      const today = dayKey()
-      let prevStreak = 0
-      let prevStreakDay: string | undefined
-      try {
-        const raw = localStorage.getItem(LS_DAILY)
-        if (raw) {
-          const p = JSON.parse(raw) as { streak?: number; streakDay?: string; d?: string }
-          prevStreak = typeof p.streak === 'number' ? p.streak : 0
-          prevStreakDay = p.streakDay ?? p.d
-        }
-      } catch { /* ignore */ }
-
-      let newStreak = 1
-      if (prevStreakDay) {
-        const gap = calendarDaysBetween(prevStreakDay, today)
-        if (gap === 0) newStreak = prevStreak
-        else if (gap === 1) newStreak = prevStreak + 1
-        else newStreak = 1
+      const newScores = [...dailyScores, score]
+      const newGuesses = [...dailyGuesses, guess]
+      setDailyScores(newScores)
+      setDailyGuesses(newGuesses)
+      if (dailyRound < DAILY_ROUNDS - 1) {
+        const nextRoundIdx = dailyRound + 1
+        setDailyRound(nextRoundIdx)
+        setTarget(dailyTargets[nextRoundIdx])
+        setGuess({ r: 128, g: 128, b: 128 })
+        setGuessPicked(false)
+        setTimer(MEMORIZE_PREP_SECONDS_DAILY)
+        setPhase('memorize')
+        return
       }
-
-      setDailyStreak(newStreak)
+      const totalScore = Math.round(newScores.reduce((a, b) => a + b, 0) / DAILY_ROUNDS)
+      setSimilarity(totalScore)
+      const today = dayKey()
+      const newStreak = incrementStreak()
       setDailyPlayed(true)
-      setDailyScore(score)
+      setDailyScore(totalScore)
       try {
-        const payload: DailyPersist = { d: today, s: score, streak: newStreak, streakDay: today }
+        const payload: DailyPersist = {
+          d: today,
+          score: totalScore,
+          s: totalScore,
+          streak: newStreak,
+          streakDay: today,
+          targetColor: dailyTargets[0] ?? target,
+          guessColor: guess,
+          scores: newScores,
+          targets: dailyTargets,
+          guesses: newGuesses,
+        }
         localStorage.setItem(LS_DAILY, JSON.stringify(payload))
       } catch { /* ignore */ }
+      saveDailyResult(colorToHex(dailyTargets[0] ?? target), totalScore)
+      setPhase('result')
     }
-    setPhase('result')
   }
 
   const nextRound = () => {
-    setTarget(randomColor())
+    setTarget(randomColorByDifficulty(difficulty))
     setGuess({ r: 128, g: 128, b: 128 })
     setGuessPicked(false)
     setSimilarity(null)
-    setMemorizePrepMsLeft(MEMORIZE_PREP_MS)
+    setTimer(MEMORIZE_PREP_SECONDS_ENDLESS)
     setPhase('memorize')
   }
-
-  const endlessAvg = endlessScores.length > 0
-    ? Math.round(endlessScores.reduce((a, b) => a + b, 0) / endlessScores.length)
-    : 0
-
-  const recentEndlessColors = endlessTargets.slice(-5)
-  const emptyColorSlots = Math.max(0, 5 - recentEndlessColors.length)
-  const endlessColorChartSlots: (Color | null)[] = [
-    ...Array.from({ length: emptyColorSlots }, () => null),
-    ...recentEndlessColors,
-  ]
 
   const t = {
     tr: {
@@ -408,6 +589,7 @@ export default function RengiHatirla() {
       todaysScore: 'bugünkü skorun',
       selectColor: 'renk seç',
       themeToggleAria: 'tema: açık, koyu veya sistem',
+      dailyPlayedCheck: 'bugün oynadın ✓',
     },
     en: {
       title: 'color memory', daily: 'daily', endless: 'endless',
@@ -423,367 +605,431 @@ export default function RengiHatirla() {
       todaysScore: "today's score",
       selectColor: 'pick a color',
       themeToggleAria: 'theme: light, dark, or match system',
+      dailyPlayedCheck: 'played today ✓',
     },
   }[lang]
 
-  const isGuessPhase = Boolean(mode && phase === 'guess')
+  const handleShare = async () => {
+    if (!mode || similarity === null) return
+    const text = generateShareText(
+      'rengi-hatirla',
+      mode,
+      similarity,
+      { lang, streak: mode === 'daily' ? readStreak() : undefined },
+    )
+    const ok = await copyToClipboard(text)
+    if (ok) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
 
   return (
-    <div style={{
-      minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column',
-      opacity: mounted ? 1 : 0, transition: 'opacity 0.3s ease',
-    }}>
-      <nav className="site-nav">
-        <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div className="renkle-mark" aria-hidden />
-          <span style={{ fontSize: 18, fontWeight: 500, letterSpacing: '-0.3px' }}>renkle</span>
-        </Link>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {mode && (
-            <button
-              type="button"
-              onClick={() => setMode(null)}
-              style={{
-                fontSize: 14,
-                fontWeight: 500,
-                color: 'var(--text-primary)',
-                background: 'transparent',
-                border: 'none',
-                borderRadius: 0,
-                cursor: 'pointer',
-                padding: 0,
-                fontFamily: 'inherit',
-              }}
+    <>
+      {showHelp && (
+        <HowToPlay
+          title={lang === 'tr' ? 'nasıl oynanır?' : 'how to play'}
+          steps={lang === 'tr' ? [
+            { text: 'Ekranda bir renk belirir, onu dikkatlice ezberle.' },
+            { text: '5 saniye sonra renk gizlenir, renk seçiciden aynısını bulmaya çalış.' },
+            { text: 'Tahminin hedefe ne kadar yakın olduğu yüzde olarak gösterilir.' },
+            { text: 'Günlük modda herkes aynı rengi tahmin eder, seri kır!' },
+          ] : [
+            { text: 'A color appears on screen — memorize it carefully.' },
+            { text: 'After 5 seconds it hides. Try to recreate it with the color picker.' },
+            { text: 'Your score shows how close your guess was as a percentage.' },
+            { text: 'In daily mode everyone guesses the same color — build your streak!' },
+          ]}
+          onClose={() => setShowHelp(false)}
+        />
+      )}
+      <GameLayout
+        lang={lang}
+        onLangChange={setLang}
+        onBack={mode ? () => setMode(null) : undefined}
+        backLabel={t.backToMenu}
+        showHelp
+        onHelpClick={() => setShowHelp(true)}
+        navEnd={<ThemeToggleButton lang={lang} ariaLabel={t.themeToggleAria} title={t.themeToggleAria} />}
+      >
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 0,
+          width: '100%',
+          animation: 'fadeIn 0.3s ease',
+          opacity: mounted ? 1 : 0,
+          transition: 'opacity 0.3s ease',
+        }}
+        >
+          <div style={{
+            ...gameContentWrapperStyle,
+            flex: 1,
+            minHeight: 0,
+            justifyContent: !mode ? 'center' : 'flex-start',
+          }}
+          >
+        <div key={`${mode ?? 'menu'}-${phase}`} style={{ width: '100%', animation: 'phaseIn 0.35s cubic-bezier(0.16,1,0.3,1)' }}>
+
+        {!mode && modParam === 'gunluk' && !dailyHydrated && (
+          <div style={{ minHeight: 160 }} aria-busy="true" />
+        )}
+
+        {/* Giriş: sınırsız */}
+        {!mode && modParam !== 'gunluk' && (
+          <div style={{ width: '100%', maxWidth: 440, margin: '0 auto' }}>
+            <div style={{
+              position: 'relative',
+              borderRadius: 'var(--radius-lg)',
+              overflow: 'hidden',
+              marginBottom: 16,
+              height: 160,
+            }}
             >
-              {t.backToMenu}
-            </button>
-          )}
-          <div style={{ display: 'flex', border: '0.5px solid var(--border)', borderRadius: 20, overflow: 'hidden' }}>
-            {(['tr', 'en'] as const).map(l => (
-              <button key={l} onClick={() => setLang(l)} style={{
-                padding: '5px 12px', fontSize: 12, border: 'none',
-                background: lang === l ? 'var(--bg-secondary)' : 'transparent',
-                color: lang === l ? 'var(--text-primary)' : 'var(--text-secondary)',
-                fontWeight: lang === l ? 500 : 400,
-              }}>{l}</button>
-            ))}
-          </div>
-          <ThemeToggleButton lang={lang} ariaLabel={t.themeToggleAria} title={t.themeToggleAria} />
-        </div>
-      </nav>
-
-      <div style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'flex-start',
-        minHeight: 0,
-        height: '100%',
-        padding: isGuessPhase
-          ? (narrowViewport
-            ? `12px var(--page-padding) 40px`
-            : `0 var(--page-padding) 40px`)
-          : '48px var(--page-padding) 40px',
-        gap: 28,
-        maxWidth: 520,
-        margin: '0 auto',
-        width: '100%',
-      }}>
-
-        {/* MOD SEÇİM */}
-        {!mode && (
-          <>
-            <div style={{ textAlign: 'center', marginBottom: 24 }}>
-              <h1 style={{ fontSize: 22, fontWeight: 500, letterSpacing: '-0.4px', marginBottom: 6 }}>{t.title}</h1>
-              <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                {lang === 'tr' ? 'rengi gör, ezberle, yeniden yarat' : 'see the color, memorize it, recreate it'}
-              </p>
-            </div>
-
-            <div className="rengi-mode-select">
-              {/* Günlük */}
-              <div
-                className="rengi-mode-card"
-                onClick={() => !dailyPlayed && startMode('daily')}
-                style={{
-                  minHeight: 240,
-                  border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)',
-                  padding: '24px', cursor: dailyPlayed ? 'default' : 'pointer',
-                  background: 'var(--bg-secondary)', opacity: dailyPlayed ? 0.7 : 1,
-                  transition: 'border-color 0.15s',
-                  display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-                }}
+              <div style={{
+                width: '100%',
+                height: '100%',
+                background: 'var(--bg-secondary)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexDirection: 'column',
+                gap: 8,
+              }}
               >
-                <div>
-                  <div style={{ marginBottom: 6 }}>
-                    <span className="rengi-mode-card__title" style={{ fontSize: 15, fontWeight: 500 }}>{t.daily}</span>
-                  </div>
-                  <p className="rengi-mode-card__desc" style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{t.dailyDesc}</p>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14, alignItems: 'flex-start' }}>
-                  {((dailyPlayed && dailyScore !== null) || dailyStreak > 0) && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', lineHeight: 1 }}>
-                      {dailyPlayed && dailyScore !== null && (
-                        <span className="rengi-mode-card__score" style={{ fontSize: 22, fontWeight: 600, color: '#639922', letterSpacing: '-0.03em' }}>
-                          {dailyScore}%
-                        </span>
-                      )}
-                      {dailyStreak > 0 && (
-                        <span
-                          className="rengi-mode-card__streak"
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            fontSize: 22,
-                            fontWeight: 600,
-                            letterSpacing: '-0.03em',
-                          }}
-                        >
-                          <span style={{ color: '#ea580c', display: 'flex', alignItems: 'center', lineHeight: 0 }}>
-                            <StreakFlameIcon muted={false} height={26} />
-                          </span>
-                          <span className="rengi-mode-card__streak-num">{dailyStreak}</span>
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#639922' }} />
-                    <span className="rengi-mode-card__countdown" style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
-                      {t.nextColor} {countdown}
-                    </span>
-                  </div>
+                <svg
+                  width="28"
+                  height="28"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="rgba(255,255,255,0.2)"
+                  strokeWidth="1.5"
+                >
+                  <path d="M2 12C2 12 5 5 12 5C19 5 22 12 22 12C22 12 19 19 12 19C5 19 2 12 2 12Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>
+                  {lang === 'tr' ? 'başla → renk ortaya çıkacak' : 'start → color will be revealed'}
                 </div>
               </div>
+            </div>
 
-              {/* Sınırsız */}
-              <div
-                className="rengi-mode-card"
-                onClick={() => startMode('endless')}
-                style={{
-                  minHeight: 240,
-                  border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)',
-                  padding: '24px', cursor: 'pointer',
-                  background: 'var(--bg-secondary)',
-                  transition: 'border-color 0.15s',
-                  display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-                }}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{
+                fontSize: 18, fontWeight: 500,
+                color: 'var(--text-primary)',
+                letterSpacing: '-0.3px', marginBottom: 4,
+              }}
               >
-                <div>
-                  <div style={{ marginBottom: 6 }}>
-                    <span className="rengi-mode-card__title" style={{ fontSize: 15, fontWeight: 500 }}>{t.endless}</span>
-                  </div>
-                  <p className="rengi-mode-card__desc" style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{t.endlessDesc}</p>
-                </div>
+                {t.title}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                {lang === 'tr' ? 'rengi gör, ezberle, yeniden yarat' : 'see it, memorize it, recreate it'}
+              </div>
+            </div>
+
+            <div style={{
+              border: '0.5px solid var(--border)',
+              borderRadius: 'var(--radius-lg)',
+              background: 'var(--bg-secondary)',
+              padding: 20,
+              display: 'flex', flexDirection: 'column', gap: 16,
+            }}
+            >
+              <div>
                 <div style={{
-                  display: 'flex', gap: 4, alignItems: 'flex-end', width: '100%', height: 32, marginTop: 14, marginBottom: 14,
-                }}>
-                  {endlessColorChartSlots.map((c, i) => (
+                  background: 'var(--bg)',
+                  borderRadius: 12,
+                  padding: 4,
+                  display: 'flex',
+                  gap: 3,
+                  border: '0.5px solid var(--border)',
+                }}
+                >
+                  {([
+                    { d: 'kolay', sub: { tr: 'büyük fark', en: 'big diff' } },
+                    { d: 'orta', sub: { tr: 'rastgele', en: 'random' } },
+                    { d: 'zor', sub: { tr: 'çok yakın', en: 'very close' } },
+                  ] as const).map(({ d, sub }) => (
                     <div
-                      key={i}
+                      key={d}
+                      onClick={() => setDifficulty(d)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          setDifficulty(d)
+                        }
+                      }}
                       style={{
-                        flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'stretch', minWidth: 0,
+                        flex: 1,
+                        padding: '10px 0',
+                        borderRadius: 9,
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        background: difficulty === d ? 'var(--bg-secondary)' : 'transparent',
+                        border: difficulty === d
+                          ? '0.5px solid var(--border-mid)'
+                          : '0.5px solid transparent',
+                        transition: 'all 0.15s',
                       }}
                     >
-                      {c === null ? (
-                        <div style={{
-                          height: 32, minHeight: 8, borderRadius: 4,
-                          border: '1px dashed var(--border-mid)', boxSizing: 'border-box',
-                        }} />
-                      ) : (
-                        <div style={{
-                          height: 32, borderRadius: 4,
-                          background: colorToCss(c),
-                          border: '0.5px solid var(--border)',
-                          boxSizing: 'border-box',
-                        }} />
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 28, marginTop: 0, justifyContent: 'flex-start' }}>
-                  {[
-                    { val: endlessScores.length > 0 ? `${endlessBest}%` : '—', lbl: t.best },
-                    { val: endlessScores.length > 0 ? `${endlessAvg}%` : '—', lbl: t.avg },
-                  ].map(({ val, lbl }) => (
-                    <div key={lbl}>
-                      <div className="rengi-mode-card__stat-val" style={{ fontSize: 16, fontWeight: 500 }}>{val}</div>
-                      <div className="rengi-mode-card__stat-lbl" style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>{lbl}</div>
+                      <div style={{
+                        fontSize: 12,
+                        color: difficulty === d ? 'var(--text-primary)' : 'var(--text-tertiary)',
+                        fontWeight: difficulty === d ? 500 : 400,
+                        marginBottom: 2,
+                      }}
+                      >
+                        {diffLabel[d][lang]}
+                      </div>
+                      <div style={{ fontSize: 9, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                        {sub[lang]}
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
+
+              <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{
+                  background: 'var(--bg)',
+                  borderRadius: 10,
+                  padding: '14px 12px',
+                  border: '0.5px solid var(--border)',
+                  flex: 1,
+                }}
+                >
+                  <div style={{ fontSize: 26, fontWeight: 500, color: 'var(--text-primary)', letterSpacing: '-1px', marginBottom: 6, lineHeight: 1 }}>∞</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                    {lang === 'tr' ? 'sınırsız soru' : 'endless questions'}
+                  </div>
+                </div>
+                <div style={{
+                  background: 'var(--bg)',
+                  borderRadius: 10,
+                  padding: '14px 12px',
+                  border: '0.5px solid var(--border)',
+                  flex: 1,
+                }}
+                >
+                  <div style={{ fontSize: 26, fontWeight: 500, color: 'var(--text-primary)', letterSpacing: '-1px', marginBottom: 6, lineHeight: 1 }}>5s</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                    {lang === 'tr' ? 'ezberleme süresi' : 'memorize time'}
+                  </div>
+                </div>
+                <div style={{
+                  background: 'var(--bg)',
+                  borderRadius: 10,
+                  padding: '14px 12px',
+                  border: '0.5px solid var(--border)',
+                  flex: 1,
+                }}
+                >
+                  <div style={{ fontSize: 26, fontWeight: 500, color: 'var(--text-primary)', letterSpacing: '-1px', marginBottom: 6, lineHeight: 1 }}>%</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                    {lang === 'tr' ? 'yakınlık puanı' : 'similarity score'}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                className="btn-press"
+                type="button"
+                onClick={() => startMode('endless')}
+                style={{
+                  width: '100%', padding: '13px 0', fontSize: 14, fontWeight: 500,
+                  border: '0.5px solid var(--border-mid)', borderRadius: 24,
+                  background: 'var(--bg-secondary)', color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                }}
+              >
+                {lang === 'tr' ? 'başla →' : 'start →'}
+              </button>
             </div>
-          </>
+          </div>
         )}
 
         {/* EZBERLE */}
         {mode && phase === 'memorize' && (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              width: '100%',
-              flex: 1,
-              gap: 0,
-              minHeight: 0,
-              alignSelf: 'stretch',
-            }}
+          <div style={{
+            width: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16,
+          }}
           >
-            <p style={{
-              margin: 0,
-              width: '100%',
-              fontSize: narrowViewport ? 20 : 13,
-              fontWeight: narrowViewport ? 500 : 400,
-              letterSpacing: narrowViewport ? '-0.3px' : 'normal',
-              color: narrowViewport ? 'var(--text-primary)' : 'var(--text-secondary)',
-              padding: narrowViewport ? '0 0 16px' : '0 0 12px',
-              textAlign: narrowViewport ? 'center' : 'left',
+            <div style={{
+              display: 'flex', alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '0 4px',
             }}
             >
-              {t.memorize}
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: 12, minHeight: 0 }}>
-              <div
-                style={{
-                  position: 'relative',
-                  width: '100%',
-                  height: 320,
-                  borderRadius: 'var(--radius-lg)',
-                  border: '0.5px solid var(--border)',
-                  background: 'var(--bg-secondary)',
-                  overflow: 'hidden',
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  fontSize: 13, color: 'var(--text-secondary)',
                 }}
-              >
-                <div
-                  aria-hidden
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    background: colorToCss(target),
-                    opacity: 1,
-                    pointerEvents: 'none',
-                  }}
-                />
-              </div>
-              <div
-                style={{
-                  alignSelf: 'center',
-                  marginTop: 10,
-                  padding: '12px 28px',
-                  borderRadius: 16,
-                  border: '0.5px solid var(--border)',
-                  background: 'var(--bg-secondary)',
-                  boxSizing: 'border-box',
-                  minWidth: 132,
-                }}
-              >
-                <span
-                  aria-live="polite"
-                  style={{
-                    display: 'block',
-                    textAlign: 'center',
-                    fontSize: 48,
-                    fontWeight: 500,
-                    color: 'var(--text-primary)',
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                    fontVariantNumeric: 'tabular-nums',
-                    lineHeight: 1,
-                  }}
                 >
-                  {formatMemorizeSeconds(memorizePrepMsLeft)}
+                  {lang === 'tr' ? 'rengi ezberle' : 'memorize the color'}
                 </span>
+                {mode === 'daily' && (
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {Array.from({ length: DAILY_ROUNDS }, (_, i) => i).map(i => (
+                      <div key={i} style={{
+                        width: 6, height: 6, borderRadius: '50%',
+                        background: i <= dailyRound ? 'var(--text-primary)' : 'var(--border)',
+                        transition: 'background 0.3s',
+                      }}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
+              <span style={{
+                fontSize: 32, fontWeight: 700,
+                fontFamily: 'monospace',
+                letterSpacing: '-1px',
+                color: timer <= 1
+                  ? '#E24B4A'
+                  : timer <= 2
+                    ? '#EF9F27'
+                    : 'var(--text-primary)',
+                transition: 'color 0.3s ease',
+              }}
+              >
+                {timer}
+              </span>
             </div>
+            <div style={{
+              width: '100%',
+              height: 280,
+              borderRadius: 'var(--radius-lg)',
+              background: colorToCss(target),
+              border: '0.5px solid var(--border)',
+              transition: 'background 0.3s ease',
+            }}
+            />
           </div>
         )}
 
-        {/* TAHMİN — mobilde başlık yok; geniş ekranda başlık navbar–renk kutusu arasında ortada */}
+        {/* TAHMİN */}
         {mode && phase === 'guess' && (
           <div style={{
             width: '100%',
-            minWidth: 0,
-            flex: narrowViewport ? '0 0 auto' : 1,
-            minHeight: narrowViewport ? undefined : 0,
             display: 'flex',
             flexDirection: 'column',
-            alignItems: 'stretch',
+            gap: 16,
+            boxSizing: 'border-box',
           }}
           >
-            {!narrowViewport && (
+            {mode === 'daily' && (
               <div style={{
-                flex: 1,
-                minHeight: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-                alignItems: 'stretch',
+                display: 'flex', alignItems: 'center',
+                justifyContent: 'space-between', width: '100%',
               }}
               >
-                <p style={{
-                  margin: 0,
-                  width: '100%',
-                  fontSize: 22,
-                  fontWeight: 500,
-                  letterSpacing: '-0.35px',
-                  color: 'var(--text-primary)',
-                  lineHeight: 1.35,
-                  textAlign: 'center',
+                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                  {lang === 'tr' ? `tur ${dailyRound + 1}/${DAILY_ROUNDS}` : `round ${dailyRound + 1}/${DAILY_ROUNDS}`}
+                </span>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {Array.from({ length: DAILY_ROUNDS }, (_, i) => i).map(i => (
+                    <div key={i} style={{
+                      width: 6, height: 6, borderRadius: '50%',
+                      background: i < dailyRound
+                        ? '#a8e063'
+                        : i === dailyRound
+                          ? 'var(--text-primary)'
+                          : 'var(--border)',
+                    }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+            {mode === 'endless' && (
+              <div style={{
+                fontSize: 11,
+                color: 'var(--text-tertiary)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+              >
+                <span style={{
+                  padding: '2px 8px',
+                  borderRadius: 20,
+                  border: '0.5px solid var(--border)',
+                  fontSize: 10,
                 }}
                 >
-                  {t.guess}
-                </p>
+                  {diffLabel[difficulty][lang]}
+                </span>
               </div>
             )}
 
-            <div style={{ width: '100%', minWidth: 0, flexShrink: 0 }}>
-              <div
-                style={{
-                  width: '100%',
-                  minWidth: 0,
-                  height: 168,
-                  borderRadius: 10,
+            <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+                <div style={{
+                  height: 120,
+                  borderRadius: 8,
+                  background: 'var(--bg-secondary)',
+                  border: '2px dashed var(--border-mid)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxSizing: 'border-box',
+                }}
+                >
+                  <LockIconSmall muted />
+                </div>
+                <span style={{
+                  fontSize: 10,
+                  color: 'var(--text-tertiary)',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                  letterSpacing: '0.04em',
+                }}
+                >
+                  {lang === 'tr' ? 'gizli' : 'hidden'}
+                </span>
+              </div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+                <div style={{
+                  height: 120,
+                  borderRadius: 8,
                   border: '0.5px solid var(--border)',
                   background: guessPicked ? colorToCss(guess) : 'var(--bg-tertiary)',
                   transition: 'background 0.08s ease',
                   boxSizing: 'border-box',
-                  position: 'relative',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
-              >
-                {!guessPicked && (
-                  <span style={{
-                    fontSize: 16,
-                    fontWeight: 500,
-                    letterSpacing: '-0.02em',
-                    color: 'var(--text-secondary)',
-                  }}>
-                    {t.selectColor}
-                  </span>
-                )}
+                >
+                  {!guessPicked && (
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t.selectColor}</span>
+                  )}
+                </div>
+                <span style={{
+                  fontSize: 10,
+                  color: 'var(--text-tertiary)',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                  letterSpacing: '0.04em',
+                }}
+                >
+                  {colorToHex(guess)}
+                </span>
               </div>
             </div>
 
-            <div style={{ width: '100%', minWidth: 0, flexShrink: 0, marginTop: 12 }}>
-              <ColorPicker onChange={(c) => { setGuess(c); setGuessPicked(true) }} />
-            </div>
+            <ColorPicker onChange={(c) => { setGuess(c); setGuessPicked(true) }} />
 
-            <button onClick={handleGuess} style={{
-              width: '100%',
-              flexShrink: 0,
-              marginTop: 12,
-              padding: '16px 0',
-              fontSize: 15,
-              fontWeight: 500,
-              border: '0.5px solid var(--border-mid)',
-              borderRadius: 24,
-              background: 'var(--bg-secondary)',
-              color: 'var(--text-primary)',
-            }}>
+            <button className="btn-press" type="button" onClick={handleGuess} style={{
+              ...gamePrimaryButtonStyle,
+              marginTop: 4,
+            }}
+            >
               {t.submit}
             </button>
           </div>
@@ -791,59 +1037,328 @@ export default function RengiHatirla() {
 
         {/* SONUÇ */}
         {mode && phase === 'result' && (
-          <>
+          <div style={{
+            width: '100%',
+            boxSizing: 'border-box',
+          }}
+          >
             {mode === 'daily' ? (
               <div style={{
-                width: '100%', alignSelf: 'stretch', maxWidth: 560, margin: '0 auto',
-                border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)',
-                background: 'var(--bg-secondary)', padding: '32px 24px 28px',
-                textAlign: 'center',
-              }}>
-                <h2 style={{
-                  fontSize: 20, fontWeight: 600, letterSpacing: '-0.02em', marginBottom: 10,
-                  color: 'var(--text-primary)',
-                }}>{t.dailyDoneTitle}</h2>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 28, lineHeight: 1.4 }}>
-                  {t.newColorCountdown}{' '}
-                  <span style={{ color: 'var(--text-primary)' }}>{countdown}</span>
-                </p>
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                gap: 20, width: '100%', maxWidth: 360,
+              }}
+              >
+                <div style={{ textAlign: 'center', animation: 'countUp 0.6s cubic-bezier(0.16,1,0.3,1) both' }}>
+                  <div style={{
+                    fontSize: 11, color: 'var(--text-tertiary)',
+                    letterSpacing: '0.08em', textTransform: 'uppercase',
+                    marginBottom: 8,
+                  }}
+                  >
+                    {lang === 'tr' ? 'bugünkü skorun' : 'your score today'}
+                  </div>
+                  <div style={{
+                    fontSize: 80, fontWeight: 700,
+                    letterSpacing: '-3px', lineHeight: 1,
+                    color: similarity && similarity >= 90 ? '#a8e063'
+                      : similarity && similarity >= 70 ? '#EF9F27'
+                      : 'var(--text-primary)',
+                  }}
+                  >
+                    {similarity}%
+                  </div>
+                  <div style={{ fontSize: 14, color: 'var(--text-tertiary)', marginTop: 6 }}>
+                    {similarity && similarity >= 90
+                      ? (lang === 'tr' ? 'mükemmel! 🎨' : 'perfect! 🎨')
+                      : similarity && similarity >= 70
+                      ? (lang === 'tr' ? 'iyi! yarın daha iyisini yapabilirsin' : 'good! try better tomorrow')
+                      : lang === 'tr' ? 'yarın tekrar dene' : 'try again tomorrow'}
+                  </div>
+                </div>
+
+                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 12, animation: 'fadeUp 0.4s ease 0.2s both' }}>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {dailyTargets.map((targetColor, i) => {
+                      const score = dailyScores[i] || 0
+                      const guessColor = dailyGuesses[i]
+                      return (
+                        <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          <div style={{
+                            height: 40, borderRadius: 6,
+                            background: colorToCss(targetColor),
+                            border: '0.5px solid rgba(255,255,255,0.1)',
+                          }}
+                          />
+                          <div style={{
+                            height: 40, borderRadius: 6,
+                            background: guessColor ? colorToCss(guessColor) : 'var(--bg-secondary)',
+                            border: '0.5px solid rgba(255,255,255,0.1)',
+                          }}
+                          />
+                          <div style={{
+                            fontSize: 10, textAlign: 'center', fontWeight: 600,
+                            color: score >= 90 ? '#a8e063'
+                              : score >= 70 ? '#EF9F27'
+                              : '#E24B4A',
+                          }}
+                          >
+                            {score}%
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  <div style={{
+                    padding: '12px 16px',
+                    background: 'var(--bg-secondary)',
+                    borderRadius: 10,
+                    border: '0.5px solid var(--border)',
+                    display: 'flex', alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                        {lang === 'tr' ? 'bugünkü ortalama' : "today's average"}
+                      </div>
+                      <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                        {lang === 'tr' ? 'tüm oyuncular ~%67' : 'all players ~67%'}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                        {lang === 'tr' ? 'senin skorun' : 'your score'}
+                      </div>
+                      <div style={{
+                        fontSize: 18, fontWeight: 700,
+                        color: similarity && similarity >= 67 ? '#a8e063' : '#EF9F27',
+                      }}
+                      >
+                        %{similarity}
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
                 <div style={{
-                  display: 'flex',
-                  flexDirection: narrowViewport ? 'column' : 'row',
-                  gap: 10,
-                  width: '100%',
-                  marginBottom: 28,
+                  width: '100%', padding: '16px 20px',
+                  background: 'var(--bg-secondary)',
+                  borderRadius: 12,
+                  border: '0.5px solid var(--border)',
+                  display: 'flex', alignItems: 'center',
+                  justifyContent: 'space-between',
+                  animation: 'fadeUp 0.4s ease 0.3s both',
                 }}
                 >
+                  <div>
+                    <div style={{
+                      fontSize: 10, color: 'var(--text-tertiary)',
+                      marginBottom: 4, textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                    }}
+                    >
+                      {lang === 'tr' ? 'yeni renge kalan süre' : 'next color in'}
+                    </div>
+                    <div style={{
+                      fontSize: 22, fontWeight: 600,
+                      color: 'var(--text-primary)',
+                      fontFamily: 'monospace',
+                      letterSpacing: '0.05em',
+                    }}
+                    >
+                      {countdown}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#a8e063' }} />
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                      {dailyStreak} {lang === 'tr' ? 'günlük seri' : 'day streak'}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', animation: 'fadeUp 0.4s ease 0.35s both' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const emojiRow = dailyScores.map(getShareEmoji).join('')
+                      const dateLabel = lang === 'tr'
+                        ? new Date().toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' })
+                        : new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long' })
+                      const text = lang === 'tr'
+                        ? `renkle — günlük rengi hatırla\n${emojiRow}\nOrtalama: %${similarity}\n${dateLabel}\nrenkle.vercel.app`
+                        : `renkle — daily color memory\n${emojiRow}\nAverage: ${similarity}%\n${dateLabel}\nrenkle.vercel.app`
+                      navigator.clipboard.writeText(text)
+                      setCopied(true)
+                      setTimeout(() => setCopied(false), 2000)
+                    }}
+                    style={{
+                      width: '100%', padding: '14px 0',
+                      fontSize: 14, fontWeight: 600,
+                      border: '0.5px solid rgba(255,255,255,0.15)',
+                      borderRadius: 24,
+                      background: 'rgba(255,255,255,0.08)',
+                      color: 'var(--text-primary)', cursor: 'pointer',
+                      letterSpacing: '-0.2px',
+                    }}
+                  >
+                    {copied
+                      ? (lang === 'tr' ? 'kopyalandı ✓' : 'copied ✓')
+                      : (lang === 'tr' ? 'sonucu paylaş' : 'share result')}
+                  </button>
+
+                  <Link href="/" style={{ textDecoration: 'none' }}>
+                    <button
+                      type="button"
+                      style={{
+                        width: '100%', padding: '14px 0',
+                        fontSize: 14, fontWeight: 500,
+                        border: '0.5px solid var(--border)',
+                        borderRadius: 24,
+                        background: 'transparent',
+                        color: 'var(--text-tertiary)', cursor: 'pointer',
+                        letterSpacing: '-0.2px',
+                      }}
+                    >
+                      {lang === 'tr' ? 'ana sayfaya dön' : 'back to home'}
+                    </button>
+                  </Link>
+                </div>
+
+                <div style={{
+                  width: '100%',
+                  animation: 'fadeUp 0.4s ease 0.4s both',
+                }}
+                >
+                  <div style={{
+                    fontSize: 10, color: 'var(--text-tertiary)',
+                    letterSpacing: '0.08em', textTransform: 'uppercase',
+                    marginBottom: 12,
+                  }}
+                  >
+                    {lang === 'tr' ? 'diğer oyunlar' : 'other games'}
+                  </div>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: 8,
+                  }}
+                  >
+                    {[
+                      {
+                        slug: 'hangisi-daha-koyu',
+                        label: { tr: 'karşılaştır', en: 'compare' },
+                        swatch: (
+                          <div style={{ display: 'flex', height: '100%' }}>
+                            <div style={{ flex: 1, background: '#E24B4A' }} />
+                            <div style={{ flex: 1, background: '#1D9E75' }} />
+                          </div>
+                        ),
+                      },
+                      {
+                        slug: 'renk-karistir',
+                        label: { tr: 'karıştır', en: 'mix' },
+                        swatch: (
+                          <div style={{
+                            display: 'flex', alignItems: 'center',
+                            justifyContent: 'center', gap: 6, height: '100%',
+                            background: '#0d0d0d',
+                          }}
+                          >
+                            <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#E24B4A' }} />
+                            <span style={{ fontSize: 10, color: '#5a5856' }}>+</span>
+                            <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#378ADD' }} />
+                          </div>
+                        ),
+                      },
+                      {
+                        slug: 'paleti-tamamla',
+                        label: { tr: 'tamamla', en: 'complete' },
+                        swatch: (
+                          <div style={{
+                            display: 'flex', alignItems: 'center',
+                            gap: 3, padding: '0 8px', height: '100%',
+                            background: '#0d0d0d',
+                          }}
+                          >
+                            <div style={{ flex: 1, height: 28, borderRadius: 4, background: '#EF9F27' }} />
+                            <div style={{
+                              flex: 1, height: 28, borderRadius: 4,
+                              border: '1.5px dashed rgba(255,255,255,0.2)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                            >
+                              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>?</span>
+                            </div>
+                            <div style={{ flex: 1, height: 28, borderRadius: 4, background: '#412402' }} />
+                          </div>
+                        ),
+                      },
+                    ].map(game => (
+                      <Link
+                        key={game.slug}
+                        href={`/${game.slug}?mod=sinirsiz`}
+                        style={{ textDecoration: 'none', color: 'inherit' }}
+                      >
+                        <div style={{
+                          border: '0.5px solid var(--border)',
+                          borderRadius: 10,
+                          overflow: 'hidden',
+                          background: 'var(--bg-secondary)',
+                          cursor: 'pointer',
+                          transition: 'transform 0.15s, border-color 0.15s',
+                        }}
+                          onMouseEnter={e => {
+                            (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)'
+                            ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border-mid)'
+                          }}
+                          onMouseLeave={e => {
+                            (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)'
+                            ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border)'
+                          }}
+                        >
+                          <div style={{ height: 56, overflow: 'hidden' }}>
+                            {game.swatch}
+                          </div>
+                          <div style={{ padding: '8px 10px 10px' }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                              {game.label[lang]}
+                            </div>
+                          </div>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', gap: 10, width: '100%', marginBottom: 24 }}>
                   {[
                     { color: target, label: t.target, hex: colorToHex(target) },
                     { color: guess, label: t.yours, hex: colorToHex(guess) },
                   ].map(({ color, label, hex }) => (
-                    <div
-                      key={label}
-                      style={{
-                        flex: narrowViewport ? '0 0 auto' : 1,
+                    <div key={label} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{
                         width: '100%',
-                        minWidth: 0,
-                        borderRadius: 14,
-                        overflow: 'hidden',
-                        border: '0.5px solid var(--border)', display: 'flex', flexDirection: 'column',
-                        background: 'var(--bg-tertiary)',
-                      }}
-                    >
-                      <div style={{
-                        width: '100%', height: 112, flexShrink: 0,
+                        height: 160,
+                        borderRadius: 'var(--radius-lg)',
                         background: colorToCss(color),
-                      }} />
-                      <div style={{
-                        padding: '12px 10px 14px', textAlign: 'center',
-                        background: 'var(--bg-tertiary)',
-                      }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                          {label}
-                        </div>
-                        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 6, letterSpacing: '0.04em' }}>
+                        border: '0.5px solid var(--border)',
+                        boxSizing: 'border-box',
+                      }}
+                      />
+                      <div>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{label}</div>
+                        <div style={{
+                          fontSize: 10,
+                          color: 'var(--text-tertiary)',
+                          marginTop: 4,
+                          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                          letterSpacing: '0.04em',
+                        }}
+                        >
                           {hex}
                         </div>
                       </div>
@@ -851,194 +1366,134 @@ export default function RengiHatirla() {
                   ))}
                 </div>
 
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                  {t.todaysScore}
-                </p>
-                <div style={{
-                  fontSize: 52, fontWeight: 600, letterSpacing: '-0.04em', lineHeight: 1,
-                  color: similarity && similarity >= 90 ? '#c8e85c' : similarity && similarity >= 70 ? '#d4a524' : 'var(--text-primary)',
-                  marginBottom: 10,
-                }}>
-                  {similarity}%
-                </div>
-                <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 28 }}>
-                  {similarity && similarity >= 90 ? t.perfect : similarity && similarity >= 70 ? t.good : t.tryAgain}
-                </p>
-
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between', gap: 12, paddingTop: 8,
-                  borderTop: '0.5px solid var(--border)', marginBottom: 24,
-                }}>
-                  {[
-                    { val: similarity !== null ? `${similarity}%` : '—', lbl: t.best },
-                    { val: dailyStreak > 0 ? String(dailyStreak) : '—', lbl: t.streak },
-                    { val: similarity !== null ? `${similarity}%` : '—', lbl: t.avg },
-                  ].map(({ val, lbl }) => (
-                    <div key={lbl} style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{val}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 6 }}>
-                        {lbl}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const text = lang === 'tr'
-                      ? `renkle — günlük rengi hatırla\nSkorun: ${similarity}%\nrenkle.vercel.app`
-                      : `renkle — daily color memory\nScore: ${similarity}%\nrenkle.vercel.app`
-                    navigator.clipboard.writeText(text)
-                  }}
-                  style={{
-                    padding: '10px 28px', fontSize: 13, fontWeight: 500,
-                    border: '0.5px solid var(--border-mid)', borderRadius: 24,
-                    background: 'var(--bg)', color: 'var(--text-primary)',
-                  }}
-                >
-                  {t.share}
-                </button>
-              </div>
-            ) : (
-              <>
-                <p style={{
-                  margin: 0,
-                  fontSize: 22,
-                  fontWeight: 500,
-                  letterSpacing: '-0.35px',
-                  color: 'var(--text-primary)',
-                  textAlign: 'center',
-                }}
-                >
-                  {t.result}
-                </p>
-                <div style={{
-                  display: 'flex',
-                  flexDirection: narrowViewport ? 'column' : 'row',
-                  gap: 10,
-                  width: '100%',
-                }}
-                >
-                  {[
-                    { color: target, label: t.target, hex: colorToHex(target) },
-                    { color: guess, label: t.yours, hex: colorToHex(guess) },
-                  ].map(({ color, label, hex }) => (
-                    <div
-                      key={label}
-                      style={{
-                        flex: narrowViewport ? '0 0 auto' : 1,
-                        width: '100%',
-                        minWidth: 0,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 6,
-                        alignItems: 'center',
-                      }}
-                    >
-                      <div style={{
-                        width: '100%', height: 120, borderRadius: 'var(--radius-md)',
-                        background: colorToCss(color), border: '0.5px solid var(--border)',
-                      }} />
-                      <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{label}</span>
-                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{hex}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div style={{ textAlign: 'center' }}>
+                <div style={{ textAlign: 'center', marginBottom: 8 }}>
                   <div style={{
-                    fontSize: 52, fontWeight: 500, letterSpacing: '-1px',
-                    color: similarity && similarity >= 90 ? '#639922' : similarity && similarity >= 70 ? '#BA7517' : 'var(--text-primary)',
-                  }}>
-                    {similarity}%
+                    fontSize: 64,
+                    fontWeight: 500,
+                    letterSpacing: '-2px',
+                    lineHeight: 1,
+                    color: similarity != null && similarity >= 90 ? '#a8e063' : similarity != null && similarity >= 70 ? '#EF9F27' : 'var(--text-primary)',
+                    animation: answerAnim === 'correct'
+                      ? 'correctPulse 0.6s ease'
+                      : answerAnim === 'wrong'
+                        ? 'wrongShake 0.5s ease'
+                        : 'none',
+                  }}
+                  >
+                    {displayScore}%
                   </div>
-                  <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 10, marginBottom: 0 }}>
                     {similarity && similarity >= 90 ? t.perfect : similarity && similarity >= 70 ? t.good : t.tryAgain}
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
+                  <button
+                    className="btn-press"
+                    type="button"
+                    onClick={nextRound}
+                    style={gamePrimaryButtonStyle}
+                  >
+                    {t.next}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleShare}
+                    style={gameSecondaryButtonStyle}
+                  >
+                    {copied
+                      ? (lang === 'tr' ? 'kopyalandı ✓' : 'copied ✓')
+                      : t.share}
+                  </button>
+                </div>
+
+                <div style={{
+                  width: '100%',
+                  borderTop: '0.5px solid var(--border)',
+                  paddingTop: 20,
+                  marginTop: 8,
+                }}
+                >
+                  <div style={{
+                    fontSize: 11, color: 'var(--text-tertiary)',
+                    letterSpacing: '0.06em', textTransform: 'uppercase',
+                    marginBottom: 12,
+                  }}
+                  >
+                    {lang === 'tr' ? 'diğer oyunlar' : 'other games'}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <Link href="/rengi-hatirla?mod=gunluk" style={{
+                      display: 'flex', alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 14px',
+                      border: '0.5px solid var(--border)',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'var(--bg-secondary)',
+                      textDecoration: 'none',
+                      transition: 'border-color 0.15s',
+                    }}
+                    >
+                      <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>
+                        {lang === 'tr' ? 'günlük versiyonu oyna' : 'play daily version'}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>→</span>
+                    </Link>
+                    {games
+                      .filter(g => g.slug !== 'rengi-hatirla' && !g.locked && g.tag !== 'soon')
+                      .map(g => (
+                        <Link key={g.slug} href={`/${g.slug}?mod=sinirsiz`} style={{
+                          display: 'flex', alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '10px 14px',
+                          border: '0.5px solid var(--border)',
+                          borderRadius: 'var(--radius-md)',
+                          background: 'var(--bg-secondary)',
+                          textDecoration: 'none',
+                          transition: 'border-color 0.15s',
+                        }}
+                        >
+                          <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>
+                            {g.title[lang]}
+                          </span>
+                          <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>→</span>
+                        </Link>
+                      ))}
                   </div>
                 </div>
               </>
             )}
-
-            {mode === 'endless' && (
-              <div style={{
-                width: '100%',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}
-              >
-                <div style={{
-                  display: 'flex',
-                  flexDirection: 'row',
-                  flexWrap: 'wrap',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  gap: 8,
-                  maxWidth: '100%',
-                }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const text = lang === 'tr'
-                        ? `renkle — rengi hatırla\nSkorun: ${similarity}%\nEn iyi: ${endlessBest}% · Ort: ${endlessAvg}%\nrenkle.vercel.app`
-                        : `renkle — color memory\nScore: ${similarity}%\nBest: ${endlessBest}% · Avg: ${endlessAvg}%\nrenkle.vercel.app`
-                      navigator.clipboard.writeText(text)
-                    }}
-                    style={{
-                      padding: '12px 14px',
-                      fontSize: 14,
-                      fontWeight: 500,
-                      border: '0.5px solid var(--border-mid)',
-                      borderRadius: 24,
-                      background: 'transparent',
-                      color: 'var(--text-secondary)',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {t.share}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={nextRound}
-                    style={{
-                      flexShrink: 0,
-                      padding: '12px 18px',
-                      fontSize: 14,
-                      fontWeight: 500,
-                      border: '0.5px solid var(--border-mid)',
-                      borderRadius: 24,
-                      background: 'var(--bg-secondary)',
-                      color: 'var(--text-primary)',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {t.next}
-                  </button>
-                  <Link
-                    href="/"
-                    style={{
-                      padding: '12px 14px',
-                      fontSize: 14,
-                      fontWeight: 500,
-                      border: '0.5px solid var(--border-mid)',
-                      borderRadius: 24,
-                      background: 'transparent',
-                      color: 'var(--text-secondary)',
-                      textDecoration: 'none',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {t.home}
-                  </Link>
-                </div>
-              </div>
-            )}
-          </>
+          </div>
         )}
+        </div>
 
+          </div>
+        </div>
+      </GameLayout>
+    </>
+  )
+}
+
+export default function RengiHatirlaPage() {
+  return (
+    <Suspense fallback={(
+      <div style={{
+        minHeight: '100vh',
+        background: 'var(--bg)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+      >
+        <div style={{
+          width: 12, height: 12, borderRadius: '50%',
+          background: 'conic-gradient(hsl(0,100%,60%), hsl(180,100%,60%), hsl(360,100%,60%))',
+        }}
+        />
       </div>
-    </div>
+    )}
+    >
+      <RengiHatirlaContent />
+    </Suspense>
   )
 }
