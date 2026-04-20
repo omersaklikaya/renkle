@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://renkle.vercel.app/sitemap.xml

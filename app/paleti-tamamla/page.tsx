@@ -3,6 +3,10 @@
 import { Suspense, useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
+import GameResult from '@/components/GameResult'
+import NavBar from '@/components/NavBar'
+import HowToPlayFab from '@/components/HowToPlayFab'
+import { readStreak } from '@/lib/streak'
 
 type Mode = 'daily' | 'endless'
 type Phase = 'menu' | 'playing' | 'result'
@@ -126,8 +130,8 @@ function PaletiTamamlaContent() {
   const [dailyPlayed, setDailyPlayed] = useState(false)
   const [dailyHydrated, setDailyHydrated] = useState(false)
   const [dailyScore, setDailyScore] = useState<number | null>(null)
-  const [answerAnim, setAnswerAnim] = useState<'correct' | 'wrong' | null>(null)
   const [displayScore, setDisplayScore] = useState(0)
+  const [isTouchPrimary, setIsTouchPrimary] = useState(false)
 
   useEffect(() => {
     setTimeout(() => setMounted(true), 50)
@@ -142,6 +146,15 @@ function PaletiTamamlaContent() {
       }
     } catch { /* ignore */ }
     setDailyHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(hover: none)')
+    const apply = () => setIsTouchPrimary(mq.matches)
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
   }, [])
 
   function getSeed(roundIndex: number, gameMode: Mode) {
@@ -219,8 +232,6 @@ function PaletiTamamlaContent() {
 
     setSelected(color)
     setIsCorrect(ok)
-    setAnswerAnim(ok ? 'correct' : 'wrong')
-    setTimeout(() => setAnswerAnim(null), 600)
     setShowFeedback(true)
 
     if (ok) {
@@ -292,6 +303,33 @@ function PaletiTamamlaContent() {
     zor: { tr: 'zor', en: 'hard' },
   }
 
+  const helpIsDaily = mode === 'daily' || (!mode && modParam === 'gunluk')
+  const helpFabTitle = lang === 'tr' ? 'nasıl oynanır?' : 'how to play'
+  const helpFabAria = lang === 'tr' ? 'nasıl oynanır' : 'how to play'
+  const helpFabSteps = helpIsDaily
+    ? (lang === 'tr' ? [
+        { text: 'Günlük görevde herkes aynı paletleri görür.' },
+        { text: 'Alttan rengi sürükleyip boş kutuya bırak; mobilde renge dokun.' },
+        { text: '3 canın ve 5 turun var.' },
+        { text: 'Zorluk 3, 5 veya 7 renkli palet üretir.' },
+      ] : [
+        { text: 'In daily mode everyone sees the same palettes.' },
+        { text: 'Drag a swatch to the empty slot; on mobile, tap a swatch.' },
+        { text: 'You have 3 lives and 5 rounds.' },
+        { text: 'Difficulty sets palette size: 3, 5, or 7 colors.' },
+      ])
+    : (lang === 'tr' ? [
+        { text: 'Gradyan palette eksik rengi bul.' },
+        { text: 'Masaüstünde sürükle-bırak; mobilde renge dokun.' },
+        { text: '3 can; yanlışta can azalır.' },
+        { text: 'Zorluk paletteki renk sayısını belirler (3 / 5 / 7).' },
+      ] : [
+        { text: 'Find the missing color in the gradient palette.' },
+        { text: 'Drag and drop on desktop; tap a swatch on mobile.' },
+        { text: 'You have 3 lives per run.' },
+        { text: 'Difficulty sets how many colors are in the palette.' },
+      ])
+
   return (
     <div style={{
       minHeight: '100vh', background: 'var(--bg)',
@@ -299,57 +337,7 @@ function PaletiTamamlaContent() {
       opacity: mounted ? 1 : 0, transition: 'opacity 0.3s ease',
     }}
     >
-      <nav style={{
-        display: 'flex', alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: 'var(--nav-padding)',
-        borderBottom: '0.5px solid var(--border)',
-      }}
-      >
-        <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none', color: 'inherit' }}>
-          <div style={{
-            width: 12, height: 12, borderRadius: '50%',
-            background: 'conic-gradient(hsl(0,100%,60%), hsl(60,100%,60%), hsl(120,100%,60%), hsl(180,100%,60%), hsl(240,100%,60%), hsl(300,100%,60%), hsl(360,100%,60%))',
-            boxShadow: '0 0 6px 1px rgba(255,255,255,0.15)',
-          }}
-          />
-          <span style={{ fontSize: 18, fontWeight: 500, letterSpacing: '-0.3px' }}>renkle</span>
-        </Link>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {phase !== 'menu' && (
-            <button
-              type="button"
-              onClick={() => { setPhase('menu'); setMode(null) }}
-              style={{
-                fontSize: 12, color: 'var(--text-secondary)',
-                background: 'none', border: 'none', cursor: 'pointer',
-              }}
-            >
-              ←
-              {' '}
-              {t.menu}
-            </button>
-          )}
-          <div style={{ display: 'flex', border: '0.5px solid var(--border)', borderRadius: 20, overflow: 'hidden' }}>
-            {(['tr', 'en'] as const).map(l => (
-              <button
-                key={l}
-                type="button"
-                onClick={() => setLang(l)}
-                style={{
-                  padding: '5px 12px', fontSize: 12, border: 'none',
-                  background: lang === l ? 'var(--bg-secondary)' : 'transparent',
-                  color: lang === l ? 'var(--text-primary)' : 'var(--text-secondary)',
-                  fontWeight: lang === l ? 500 : 400,
-                  cursor: 'pointer',
-                }}
-              >
-                {l.toUpperCase()}
-              </button>
-            ))}
-          </div>
-        </div>
-      </nav>
+      <NavBar lang={lang} onLangChange={setLang} streak={readStreak()} />
 
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column',
@@ -446,9 +434,9 @@ function PaletiTamamlaContent() {
                 }}
                 >
                   {([
-                    { d: 'kolay', sub: { tr: 'büyük fark', en: 'big diff' } },
-                    { d: 'orta', sub: { tr: 'rastgele', en: 'random' } },
-                    { d: 'zor', sub: { tr: 'çok yakın', en: 'very close' } },
+                    { d: 'kolay', sub: { tr: '3 renk', en: '3 colors' } },
+                    { d: 'orta', sub: { tr: '5 renk', en: '5 colors' } },
+                    { d: 'zor', sub: { tr: '7 renk', en: '7 colors' } },
                   ] as const).map(({ d, sub }) => (
                     <div
                       key={d}
@@ -566,7 +554,17 @@ function PaletiTamamlaContent() {
 
         {/* PLAYING */}
         {phase === 'playing' && (
-          <>
+          <div style={{
+            maxWidth: 560,
+            margin: '0 auto',
+            width: '100%',
+            padding: '32px var(--page-padding)',
+            boxSizing: 'border-box',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+          }}
+          >
             {/* Üst bar */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
               <div style={{ display: 'flex', gap: 4 }}>
@@ -605,9 +603,22 @@ function PaletiTamamlaContent() {
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12, textAlign: 'center' }}>
                 {t.options}
               </div>
-              <div style={{ display: 'flex', gap: 6, width: '100%' }}>
+              <div style={{ display: 'flex', gap: 8, width: '100%' }}>
                 {palette.map((color, i) => {
                   const isEmpty = i === emptyIndex
+                  const correct = palette[emptyIndex]!
+                  const emptyBg = showFeedback && isEmpty
+                    ? colorToCss(correct)
+                    : isEmpty
+                      ? (dragOver ? 'rgba(255,255,255,0.08)' : 'transparent')
+                      : colorToCss(color)
+                  const emptyBorder = showFeedback && isEmpty
+                    ? (isCorrect ? '2px solid #a8e063' : '2px solid #E24B4A')
+                    : isEmpty
+                      ? (dragOver
+                        ? '2px dashed rgba(255,255,255,0.4)'
+                        : '2px dashed rgba(255,255,255,0.2)')
+                      : '0.5px solid var(--border)'
                   return (
                     <div
                       key={i}
@@ -620,38 +631,17 @@ function PaletiTamamlaContent() {
                       } : undefined}
                       style={{
                         flex: 1,
-                        aspectRatio: '1',
+                        height: 80,
                         borderRadius: 10,
-                        background: isEmpty
-                          ? (dragOver ? 'var(--bg-tertiary)' : 'var(--bg-secondary)')
-                          : colorToCss(color),
-                        border: isEmpty
-                          ? (dragOver
-                            ? '2px dashed var(--border-mid)'
-                            : '2px dashed var(--border)')
-                          : showFeedback && !isCorrect && i === emptyIndex
-                            ? '2px solid #E24B4A'
-                            : '0.5px solid var(--border)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        transition: 'border-color 0.15s, background 0.15s',
+                        background: emptyBg,
+                        border: emptyBorder,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transition: 'all 0.15s',
                         position: 'relative',
                       }}
-                    >
-                      {isEmpty && (
-                        <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>?</span>
-                      )}
-                      {isEmpty && showFeedback && (
-                        <div style={{
-                          position: 'absolute', inset: 0,
-                          background: colorToCss(palette[emptyIndex]!),
-                          borderRadius: 8,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}
-                        >
-                          <span style={{ fontSize: 16 }}>{isCorrect ? '✓' : '✗'}</span>
-                        </div>
-                      )}
-                    </div>
+                    />
                   )
                 })}
               </div>
@@ -659,45 +649,52 @@ function PaletiTamamlaContent() {
 
             {/* Seçenekler */}
             <div style={{
-              display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, width: '100%',
-              animation: answerAnim === 'correct'
-                ? 'correctPulse 0.6s ease'
-                : answerAnim === 'wrong'
-                  ? 'wrongShake 0.5s ease'
-                  : 'none',
-            }}>
+              display: 'grid',
+              gridTemplateColumns: difficulty === 'zor' ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)',
+              gap: 8,
+              width: '100%',
+              marginTop: 24,
+            }}
+            >
               {options.map((opt, i) => {
                 const isSelected = selected?.r === opt.r && selected?.g === opt.g && selected?.b === opt.b
                 const correct = palette[emptyIndex]!
                 const isThisCorrect = opt.r === correct.r && opt.g === correct.g && opt.b === correct.b
+                const isDraggingThis = !showFeedback
+                  && draggedColor?.r === opt.r
+                  && draggedColor?.g === opt.g
+                  && draggedColor?.b === opt.b
+                let optionBorder = '0.5px solid var(--border)'
+                if (showFeedback) {
+                  if (isThisCorrect) optionBorder = '2px solid #a8e063'
+                  else if (isSelected && !isThisCorrect) optionBorder = '2px solid #E24B4A'
+                }
                 return (
                   <div
                     key={i}
                     draggable={!showFeedback}
                     onDragStart={() => setDraggedColor(opt)}
                     onDragEnd={() => setDraggedColor(null)}
-                    onClick={() => !showFeedback && handleAnswer(opt)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (!showFeedback && (e.key === 'Enter' || e.key === ' ')) {
+                    onClick={isTouchPrimary && !showFeedback ? () => handleAnswer(opt) : undefined}
+                    role={isTouchPrimary ? 'button' : undefined}
+                    tabIndex={isTouchPrimary && !showFeedback ? 0 : undefined}
+                    onKeyDown={isTouchPrimary && !showFeedback ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault()
                         handleAnswer(opt)
                       }
-                    }}
+                    } : undefined}
                     style={{
-                      height: 72,
-                      borderRadius: 'var(--radius-md)',
+                      height: 80,
+                      borderRadius: 10,
                       background: colorToCss(opt),
                       cursor: showFeedback ? 'default' : 'grab',
-                      border: showFeedback && isSelected
-                        ? `3px solid ${isThisCorrect ? '#a8e063' : '#E24B4A'}`
-                        : showFeedback && isThisCorrect
-                          ? '3px solid #a8e063'
-                          : '0.5px solid var(--border)',
-                      transition: 'transform 0.15s, border 0.15s',
-                      transform: draggedColor?.r === opt.r && draggedColor?.g === opt.g && draggedColor?.b === opt.b ? 'scale(0.95) rotate(2deg)' : 'scale(1)',
-                      opacity: showFeedback && isSelected && !isThisCorrect ? 0.5 : 1,
+                      border: optionBorder,
+                      transition: 'all 0.15s',
+                      transform: isDraggingThis ? 'scale(0.95)' : 'scale(1)',
+                      opacity: isDraggingThis
+                        ? 0.5
+                        : (showFeedback && isSelected && !isThisCorrect ? 0.5 : 1),
                     }}
                   />
                 )
@@ -715,98 +712,27 @@ function PaletiTamamlaContent() {
                 {isCorrect ? t.correct : t.wrong}
               </div>
             )}
-          </>
+          </div>
         )}
 
         {/* RESULT */}
         {phase === 'result' && (
-          <>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                {t.result}
-              </div>
-              <div style={{
-                fontSize: 64, fontWeight: 500,
-                letterSpacing: '-2px', lineHeight: 1, marginBottom: 4,
-                color: score >= 400 ? '#a8e063' : score >= 200 ? '#EF9F27' : 'var(--text-primary)',
-              }}
-              >
-                {displayScore}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t.totalScore}</div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', marginTop: 16 }}>
-              <button
-                className="btn-press"
-                type="button"
-                onClick={() => startGame(mode!)}
-                style={{
-                  width: '100%', padding: '13px 0', fontSize: 14, fontWeight: 500,
-                  border: '0.5px solid var(--border-mid)', borderRadius: 24,
-                  background: 'var(--bg-secondary)', color: 'var(--text-primary)',
-                  cursor: 'pointer',
-                }}
-              >
-                {t.again}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setPhase('menu'); setMode(null) }}
-                style={{
-                  width: '100%', padding: '13px 0', fontSize: 14,
-                  border: '0.5px solid var(--border)', borderRadius: 24,
-                  background: 'transparent', color: 'var(--text-secondary)',
-                  cursor: 'pointer',
-                }}
-              >
-                {t.menu}
-              </button>
-            </div>
-
-            {/* Diğer oyunlar */}
-            <div style={{
-              width: '100%', borderTop: '0.5px solid var(--border)',
-              paddingTop: 20, marginTop: 8,
+          <GameResult
+            lang={lang}
+            score={displayScore}
+            scoreLabel={t.totalScore}
+            scoreColor={score >= 400 ? '#a8e063' : score >= 200 ? '#EF9F27' : 'var(--text-primary)'}
+            subtitle={t.result}
+            primaryAction={{
+              label: t.again,
+              onClick: () => startGame(mode!),
             }}
-            >
-              <div style={{
-                fontSize: 11, color: 'var(--text-tertiary)',
-                letterSpacing: '0.06em', textTransform: 'uppercase',
-                marginBottom: 12,
-              }}
-              >
-                {lang === 'tr' ? 'diğer oyunlar' : 'other games'}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {[
-                  { slug: 'rengi-hatirla', tr: 'rengi hatırla', en: 'color memory' },
-                  { slug: 'hangisi-daha-koyu', tr: 'hangisi daha koyu?', en: 'which is darker?' },
-                  { slug: 'renk-karistir', tr: 'renk karıştır', en: 'mix colors' },
-                ].map(g => (
-                  <Link key={g.slug} href={`/${g.slug}?mod=sinirsiz`} style={{
-                    display: 'flex', alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '10px 14px',
-                    border: '0.5px solid var(--border)',
-                    borderRadius: 'var(--radius-md)',
-                    background: 'var(--bg-secondary)',
-                    textDecoration: 'none',
-                    color: 'inherit',
-                  }}
-                  >
-                    <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>
-                      {lang === 'tr' ? g.tr : g.en}
-                    </span>
-                    <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>→</span>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          </>
+            currentSlug="paleti-tamamla"
+          />
         )}
         </div>
       </div>
+      <HowToPlayFab title={helpFabTitle} ariaLabel={helpFabAria} steps={helpFabSteps} />
     </div>
   )
 }

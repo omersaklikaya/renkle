@@ -6,8 +6,8 @@ export type SiteThemePreference = 'system' | 'light' | 'dark'
 export const SITE_THEME_STORAGE_KEY = 'renkle-theme'
 
 export const SITE_THEME_ICONS: Record<SiteTheme, string> = {
-  light: '/favicon.ico',
-  dark: '/favicon.ico',
+  light: '/favicon.svg',
+  dark: '/favicon.svg',
 }
 
 const THEME_EVENT = 'renkle:theme'

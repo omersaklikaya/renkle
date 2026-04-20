@@ -5,7 +5,6 @@ import './globals.css'
 import SplashScreen from '@/components/SplashScreen'
 import { SiteThemeProvider } from '@/components/SiteThemeProvider'
 import ThemeBootScript from '@/components/ThemeBootScript'
-import { SITE_THEME_ICONS } from '@/lib/siteTheme'
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
@@ -14,12 +13,14 @@ const dmSans = DM_Sans({
 })
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://renkle.vercel.app'),
   title: 'renkle — günlük renk bulmacaları',
   description: 'her gün yeni renk bulmacaları. oyna, öğren, paylaş.',
   icons: {
     icon: [
-      { url: SITE_THEME_ICONS.light, type: 'image/x-icon' },
+      { url: '/favicon.svg', type: 'image/svg+xml' },
     ],
+    apple: '/favicon.svg',
   },
 }
 

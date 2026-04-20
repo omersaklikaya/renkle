@@ -1,5 +1,7 @@
 'use client'
 
+import Link from 'next/link'
+
 interface NavBarProps {
   lang: 'tr' | 'en'
   onLangChange: (lang: 'tr' | 'en') => void
@@ -8,30 +10,37 @@ interface NavBarProps {
 
 export default function NavBar({ lang, onLangChange, streak }: NavBarProps) {
   return (
-    <nav style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '14px 48px',
-      borderBottom: '0.5px solid var(--border)',
-      background: 'var(--bg)',
-      animation: 'fadeUp 0.4s ease 0s both',
-    }}
+    <nav
+      style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        boxSizing: 'border-box',
+        height: 'var(--nav-height)',
+        minHeight: 'var(--nav-height)',
+        padding: 'var(--nav-padding)',
+        borderBottom: '0.5px solid var(--border)',
+        background: 'var(--bg)',
+        flexShrink: 0,
+        animation: 'fadeUp 0.4s ease 0s both',
+      }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{
-          width: 12,
-          height: 12,
-          borderRadius: '50%',
-          background: 'conic-gradient(hsl(0,100%,60%), hsl(60,100%,60%), hsl(120,100%,60%), hsl(180,100%,60%), hsl(240,100%,60%), hsl(300,100%,60%), hsl(360,100%,60%))',
-          boxShadow: '0 0 6px 1px rgba(255,255,255,0.15)',
-          flexShrink: 0,
-        }}
+      <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none', color: 'inherit' }}>
+        <div
+          style={{
+            width: 12,
+            height: 12,
+            borderRadius: '50%',
+            background: 'conic-gradient(hsl(0,100%,60%), hsl(60,100%,60%), hsl(120,100%,60%), hsl(180,100%,60%), hsl(240,100%,60%), hsl(300,100%,60%), hsl(360,100%,60%))',
+            boxShadow: '0 0 6px 1px rgba(255,255,255,0.15)',
+            flexShrink: 0,
+          }}
         />
-        <span style={{ fontSize: 17, fontWeight: 500, letterSpacing: '-0.3px' }}>
+        <span style={{ fontSize: 18, fontWeight: 500, letterSpacing: '-0.3px' }}>
           renkle
         </span>
-      </div>
+      </Link>
 
       {streak > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>

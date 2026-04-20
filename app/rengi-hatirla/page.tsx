@@ -4,8 +4,7 @@ import { Suspense, useState, useRef, useEffect, useLayoutEffect, useCallback } f
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import GameLayout from '@/components/GameLayout'
-import HowToPlay from '@/components/HowToPlay'
-import ThemeToggleButton from '@/components/ThemeToggleButton'
+import HowToPlayFab from '@/components/HowToPlayFab'
 import { saveDailyResult } from '@/lib/colorHistory'
 import {
   gameContentWrapperStyle,
@@ -18,7 +17,7 @@ import {
   LS_RENGI_DAILY as LS_DAILY,
   dayKey,
 } from '@/lib/rengiDailyStreak'
-import { games } from '@/lib/games'
+import { GameResultOtherGamesGrid } from '@/components/GameResult'
 
 type Phase = 'memorize' | 'guess' | 'result'
 type Mode = 'daily' | 'endless'
@@ -112,13 +111,42 @@ const DAILY_ROUNDS = 5
 function getDailyTargets(): Color[] {
   const d = new Date()
   const seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()
-  const pseudo = (n: number) => { const x = Math.sin(n) * 10000; return x - Math.floor(x) }
-  const difficulties = [120, 90, 60, 35, 15]
-  return difficulties.map((_, i) => ({
-    r: Math.floor(pseudo(seed + i * 10) * 256),
-    g: Math.floor(pseudo(seed + i * 10 + 1) * 256),
-    b: Math.floor(pseudo(seed + i * 10 + 2) * 256),
-  }))
+  const pseudo = (n: number) => {
+    const x = Math.sin(n) * 10000
+    return x - Math.floor(x)
+  }
+
+  const targets: Color[] = []
+
+  targets.push({
+    r: Math.floor(pseudo(seed) * 256),
+    g: Math.floor(pseudo(seed + 1) * 256),
+    b: Math.floor(pseudo(seed + 2) * 256),
+  })
+
+  for (let i = 1; i <= 2; i++) {
+    targets.push({
+      r: Math.floor(pseudo(seed + i * 10) * 256),
+      g: Math.floor(pseudo(seed + i * 10 + 1) * 256),
+      b: Math.floor(pseudo(seed + i * 10 + 2) * 256),
+    })
+  }
+
+  const base4 = Math.floor(pseudo(seed + 40) * 200) + 28
+  targets.push({
+    r: Math.min(255, Math.max(0, base4 + Math.floor(pseudo(seed + 41) * 40) - 20)),
+    g: Math.min(255, Math.max(0, base4 + Math.floor(pseudo(seed + 42) * 40) - 20)),
+    b: Math.min(255, Math.max(0, base4 + Math.floor(pseudo(seed + 43) * 40) - 20)),
+  })
+
+  const base5 = Math.floor(pseudo(seed + 50) * 180) + 40
+  targets.push({
+    r: Math.min(255, Math.max(0, base5 + Math.floor(pseudo(seed + 51) * 20) - 10)),
+    g: Math.min(255, Math.max(0, base5 + Math.floor(pseudo(seed + 52) * 20) - 10)),
+    b: Math.min(255, Math.max(0, base5 + Math.floor(pseudo(seed + 53) * 20) - 10)),
+  })
+
+  return targets
 }
 
 function getShareEmoji(score: number): string {
@@ -298,7 +326,6 @@ function RengiHatirlaContent() {
   const modParam = searchParams.get('mod')
 
   const [lang, setLang] = useState<'tr' | 'en'>('tr')
-  const [showHelp, setShowHelp] = useState(false)
   const [mode, setMode] = useState<Mode | null>(null)
   const [phase, setPhase] = useState<Phase>('memorize')
   const [difficulty, setDifficulty] = useState<Difficulty>('orta')
@@ -588,7 +615,6 @@ function RengiHatirlaContent() {
       dailyDoneTitle: 'bugünlük tamam.', newColorCountdown: 'yeni renk:',
       todaysScore: 'bugünkü skorun',
       selectColor: 'renk seç',
-      themeToggleAria: 'tema: açık, koyu veya sistem',
       dailyPlayedCheck: 'bugün oynadın ✓',
     },
     en: {
@@ -604,10 +630,36 @@ function RengiHatirlaContent() {
       dailyDoneTitle: 'all done for today.', newColorCountdown: 'new color:',
       todaysScore: "today's score",
       selectColor: 'pick a color',
-      themeToggleAria: 'theme: light, dark, or match system',
       dailyPlayedCheck: 'played today ✓',
     },
   }[lang]
+
+  const helpIsDaily = mode === 'daily' || (!mode && modParam === 'gunluk')
+  const helpFabTitle = lang === 'tr' ? 'nasıl oynanır?' : 'how to play'
+  const helpFabAria = lang === 'tr' ? 'nasıl oynanır' : 'how to play'
+  const helpFabSteps = helpIsDaily
+    ? (lang === 'tr' ? [
+        { text: '5 farklı renk sırayla gösterilir.' },
+        { text: 'Her rengi 3 saniyede ezberle.' },
+        { text: 'Renk seçiciyle aynısını bul.' },
+        { text: '5 turun ortalaması skorun olur.' },
+      ] : [
+        { text: 'Five different colors are shown in order.' },
+        { text: 'Memorize each color in 3 seconds.' },
+        { text: 'Match it with the color picker.' },
+        { text: 'Your score is the average of all 5 rounds.' },
+      ])
+    : (lang === 'tr' ? [
+        { text: 'Bir renk gösterilir, 5 saniyede ezberle.' },
+        { text: 'Renk seçiciyle aynısını yeniden yarat.' },
+        { text: 'Yüzde olarak ne kadar yakın olduğunu gör.' },
+        { text: 'İstediğin kadar oyna.' },
+      ] : [
+        { text: 'A color appears — memorize it in 5 seconds.' },
+        { text: 'Recreate it with the color picker.' },
+        { text: 'See how close you were as a percentage.' },
+        { text: 'Play as many rounds as you like.' },
+      ])
 
   const handleShare = async () => {
     if (!mode || similarity === null) return
@@ -625,33 +677,11 @@ function RengiHatirlaContent() {
   }
 
   return (
-    <>
-      {showHelp && (
-        <HowToPlay
-          title={lang === 'tr' ? 'nasıl oynanır?' : 'how to play'}
-          steps={lang === 'tr' ? [
-            { text: 'Ekranda bir renk belirir, onu dikkatlice ezberle.' },
-            { text: '5 saniye sonra renk gizlenir, renk seçiciden aynısını bulmaya çalış.' },
-            { text: 'Tahminin hedefe ne kadar yakın olduğu yüzde olarak gösterilir.' },
-            { text: 'Günlük modda herkes aynı rengi tahmin eder, seri kır!' },
-          ] : [
-            { text: 'A color appears on screen — memorize it carefully.' },
-            { text: 'After 5 seconds it hides. Try to recreate it with the color picker.' },
-            { text: 'Your score shows how close your guess was as a percentage.' },
-            { text: 'In daily mode everyone guesses the same color — build your streak!' },
-          ]}
-          onClose={() => setShowHelp(false)}
-        />
-      )}
-      <GameLayout
-        lang={lang}
-        onLangChange={setLang}
-        onBack={mode ? () => setMode(null) : undefined}
-        backLabel={t.backToMenu}
-        showHelp
-        onHelpClick={() => setShowHelp(true)}
-        navEnd={<ThemeToggleButton lang={lang} ariaLabel={t.themeToggleAria} title={t.themeToggleAria} />}
-      >
+    <GameLayout
+      lang={lang}
+      onLangChange={setLang}
+      streak={readStreak()}
+    >
         <div style={{
           flex: 1,
           display: 'flex',
@@ -667,10 +697,23 @@ function RengiHatirlaContent() {
             ...gameContentWrapperStyle,
             flex: 1,
             minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            width: '100%',
             justifyContent: !mode ? 'center' : 'flex-start',
           }}
           >
-        <div key={`${mode ?? 'menu'}-${phase}`} style={{ width: '100%', animation: 'phaseIn 0.35s cubic-bezier(0.16,1,0.3,1)' }}>
+        <div
+          key={`${mode ?? 'menu'}-${phase}`}
+          style={{
+            width: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            animation: 'phaseIn 0.35s cubic-bezier(0.16,1,0.3,1)',
+          }}
+        >
 
         {!mode && modParam === 'gunluk' && !dailyHydrated && (
           <div style={{ minHeight: 160 }} aria-busy="true" />
@@ -1040,12 +1083,23 @@ function RengiHatirlaContent() {
           <div style={{
             width: '100%',
             boxSizing: 'border-box',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'flex-start',
           }}
           >
             {mode === 'daily' ? (
               <div style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center',
-                gap: 20, width: '100%', maxWidth: 360,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 20,
+                width: '100%',
+                maxWidth: 480,
+                margin: '0 auto',
+                padding: '32px var(--page-padding)',
+                boxSizing: 'border-box',
               }}
               >
                 <div style={{ textAlign: 'center', animation: 'countUp 0.6s cubic-bezier(0.16,1,0.3,1) both' }}>
@@ -1231,105 +1285,7 @@ function RengiHatirlaContent() {
                   animation: 'fadeUp 0.4s ease 0.4s both',
                 }}
                 >
-                  <div style={{
-                    fontSize: 10, color: 'var(--text-tertiary)',
-                    letterSpacing: '0.08em', textTransform: 'uppercase',
-                    marginBottom: 12,
-                  }}
-                  >
-                    {lang === 'tr' ? 'diğer oyunlar' : 'other games'}
-                  </div>
-                  <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: 8,
-                  }}
-                  >
-                    {[
-                      {
-                        slug: 'hangisi-daha-koyu',
-                        label: { tr: 'karşılaştır', en: 'compare' },
-                        swatch: (
-                          <div style={{ display: 'flex', height: '100%' }}>
-                            <div style={{ flex: 1, background: '#E24B4A' }} />
-                            <div style={{ flex: 1, background: '#1D9E75' }} />
-                          </div>
-                        ),
-                      },
-                      {
-                        slug: 'renk-karistir',
-                        label: { tr: 'karıştır', en: 'mix' },
-                        swatch: (
-                          <div style={{
-                            display: 'flex', alignItems: 'center',
-                            justifyContent: 'center', gap: 6, height: '100%',
-                            background: '#0d0d0d',
-                          }}
-                          >
-                            <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#E24B4A' }} />
-                            <span style={{ fontSize: 10, color: '#5a5856' }}>+</span>
-                            <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#378ADD' }} />
-                          </div>
-                        ),
-                      },
-                      {
-                        slug: 'paleti-tamamla',
-                        label: { tr: 'tamamla', en: 'complete' },
-                        swatch: (
-                          <div style={{
-                            display: 'flex', alignItems: 'center',
-                            gap: 3, padding: '0 8px', height: '100%',
-                            background: '#0d0d0d',
-                          }}
-                          >
-                            <div style={{ flex: 1, height: 28, borderRadius: 4, background: '#EF9F27' }} />
-                            <div style={{
-                              flex: 1, height: 28, borderRadius: 4,
-                              border: '1.5px dashed rgba(255,255,255,0.2)',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            }}
-                            >
-                              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>?</span>
-                            </div>
-                            <div style={{ flex: 1, height: 28, borderRadius: 4, background: '#412402' }} />
-                          </div>
-                        ),
-                      },
-                    ].map(game => (
-                      <Link
-                        key={game.slug}
-                        href={`/${game.slug}?mod=sinirsiz`}
-                        style={{ textDecoration: 'none', color: 'inherit' }}
-                      >
-                        <div style={{
-                          border: '0.5px solid var(--border)',
-                          borderRadius: 10,
-                          overflow: 'hidden',
-                          background: 'var(--bg-secondary)',
-                          cursor: 'pointer',
-                          transition: 'transform 0.15s, border-color 0.15s',
-                        }}
-                          onMouseEnter={e => {
-                            (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)'
-                            ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border-mid)'
-                          }}
-                          onMouseLeave={e => {
-                            (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)'
-                            ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border)'
-                          }}
-                        >
-                          <div style={{ height: 56, overflow: 'hidden' }}>
-                            {game.swatch}
-                          </div>
-                          <div style={{ padding: '8px 10px 10px' }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
-                              {game.label[lang]}
-                            </div>
-                          </div>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
+                  <GameResultOtherGamesGrid currentSlug="rengi-hatirla" lang={lang} />
                 </div>
               </div>
             ) : (
@@ -1414,52 +1370,7 @@ function RengiHatirlaContent() {
                   marginTop: 8,
                 }}
                 >
-                  <div style={{
-                    fontSize: 11, color: 'var(--text-tertiary)',
-                    letterSpacing: '0.06em', textTransform: 'uppercase',
-                    marginBottom: 12,
-                  }}
-                  >
-                    {lang === 'tr' ? 'diğer oyunlar' : 'other games'}
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <Link href="/rengi-hatirla?mod=gunluk" style={{
-                      display: 'flex', alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '10px 14px',
-                      border: '0.5px solid var(--border)',
-                      borderRadius: 'var(--radius-md)',
-                      background: 'var(--bg-secondary)',
-                      textDecoration: 'none',
-                      transition: 'border-color 0.15s',
-                    }}
-                    >
-                      <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>
-                        {lang === 'tr' ? 'günlük versiyonu oyna' : 'play daily version'}
-                      </span>
-                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>→</span>
-                    </Link>
-                    {games
-                      .filter(g => g.slug !== 'rengi-hatirla' && !g.locked && g.tag !== 'soon')
-                      .map(g => (
-                        <Link key={g.slug} href={`/${g.slug}?mod=sinirsiz`} style={{
-                          display: 'flex', alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '10px 14px',
-                          border: '0.5px solid var(--border)',
-                          borderRadius: 'var(--radius-md)',
-                          background: 'var(--bg-secondary)',
-                          textDecoration: 'none',
-                          transition: 'border-color 0.15s',
-                        }}
-                        >
-                          <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>
-                            {g.title[lang]}
-                          </span>
-                          <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>→</span>
-                        </Link>
-                      ))}
-                  </div>
+                  <GameResultOtherGamesGrid currentSlug="rengi-hatirla" lang={lang} />
                 </div>
               </>
             )}
@@ -1469,8 +1380,8 @@ function RengiHatirlaContent() {
 
           </div>
         </div>
-      </GameLayout>
-    </>
+      <HowToPlayFab title={helpFabTitle} ariaLabel={helpFabAria} steps={helpFabSteps} />
+    </GameLayout>
   )
 }
 

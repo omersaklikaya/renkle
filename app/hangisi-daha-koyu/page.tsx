@@ -4,13 +4,11 @@ import { Suspense, useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import GameLayout from '@/components/GameLayout'
+import { readStreak } from '@/lib/streak'
 import { getLocalDayKey } from '@/lib/colorHistory'
-import {
-  gameContentWrapperStyle,
-  gamePrimaryButtonStyle,
-  gameSecondaryButtonStyle,
-} from '@/lib/gamePageStyles'
-import { copyToClipboard, generateShareText } from '@/lib/share'
+import { gameContentWrapperStyle } from '@/lib/gamePageStyles'
+import GameResult from '@/components/GameResult'
+import HowToPlayFab from '@/components/HowToPlayFab'
 
 const LS_HANGISI_DAILY = 'renkle-hangisi-daily'
 
@@ -62,17 +60,19 @@ function seededRandom(seed: number) {
 function getDailyPairs(): [Color, Color][] {
   const seed = getDailySeed()
   const pairs: [Color, Color][] = []
-  for (let i = 0; i < 10; i++) {
-    const r1 = Math.floor(seededRandom(seed + i * 6) * 256)
-    const g1 = Math.floor(seededRandom(seed + i * 6 + 1) * 256)
-    const b1 = Math.floor(seededRandom(seed + i * 6 + 2) * 256)
-    const r2 = Math.floor(seededRandom(seed + i * 6 + 3) * 256)
-    const g2 = Math.floor(seededRandom(seed + i * 6 + 4) * 256)
-    const b2 = Math.floor(seededRandom(seed + i * 6 + 5) * 256)
-    pairs.push([
-      { r: r1, g: g1, b: b1 },
-      { r: r2, g: g2, b: b2 },
-    ])
+  let attempt = 0
+  while (pairs.length < 10) {
+    const r1 = Math.floor(seededRandom(seed + attempt * 6) * 256)
+    const g1 = Math.floor(seededRandom(seed + attempt * 6 + 1) * 256)
+    const b1 = Math.floor(seededRandom(seed + attempt * 6 + 2) * 256)
+    const r2 = Math.floor(seededRandom(seed + attempt * 6 + 3) * 256)
+    const g2 = Math.floor(seededRandom(seed + attempt * 6 + 4) * 256)
+    const b2 = Math.floor(seededRandom(seed + attempt * 6 + 5) * 256)
+    const c1 = { r: r1, g: g1, b: b1 }
+    const c2 = { r: r2, g: g2, b: b2 }
+    const diff = Math.abs(getBrightness(c1) - getBrightness(c2))
+    if (diff >= 30) pairs.push([c1, c2])
+    attempt++
   }
   return pairs
 }
@@ -99,10 +99,8 @@ function HangisiDahaKoyuContent() {
   const [dailyPlayed, setDailyPlayed] = useState(false)
   const [dailyHydrated, setDailyHydrated] = useState(false)
   const dailySavedRef = useRef(false)
-  const [copied, setCopied] = useState(false)
   const [lives, setLives] = useState(3)
   const [answerAnim, setAnswerAnim] = useState<'correct' | 'wrong' | null>(null)
-  const [displayScore, setDisplayScore] = useState(0)
 
   useEffect(() => { setTimeout(() => setMounted(true), 50) }, [])
 
@@ -115,7 +113,7 @@ function HangisiDahaKoyuContent() {
     setGameOver(false)
     setWrongColor(null)
     setLastPoints(null)
-    setLives(m === 'endless' ? 3 : 1)
+    setLives(3)
 
     if (m === 'daily') {
       setPairs(getDailyPairs())
@@ -164,25 +162,6 @@ function HangisiDahaKoyuContent() {
     } catch { /* ignore */ }
   }, [phase, mode, score])
 
-  useEffect(() => {
-    if (phase !== 'result') return
-    const target = score
-    const duration = 1200
-    const steps = 60
-    const increment = target / steps
-    let current = 0
-    const timer = setInterval(() => {
-      current += increment
-      if (current >= target) {
-        setDisplayScore(target)
-        clearInterval(timer)
-      } else {
-        setDisplayScore(Math.floor(current))
-      }
-    }, duration / steps)
-    return () => clearInterval(timer)
-  }, [phase, score])
-
   const currentPair = pairs[currentIndex]
 
   const handleChoice = (choice: 'left' | 'right') => {
@@ -226,21 +205,16 @@ function HangisiDahaKoyuContent() {
       setWrongColor(choice)
       setTimeout(() => {
         setWrongColor(null)
-        if (mode === 'daily') {
-          setGameOver(true)
-          setPhase('result')
-        } else {
-          setLives((prev) => {
-            const n = prev - 1
-            if (n <= 0) {
-              queueMicrotask(() => {
-                setGameOver(true)
-                setPhase('result')
-              })
-            }
-            return n
-          })
-        }
+        setLives((prev) => {
+          const n = prev - 1
+          if (n <= 0) {
+            queueMicrotask(() => {
+              setGameOver(true)
+              setPhase('result')
+            })
+          }
+          return n
+        })
       }, 600)
     }
   }
@@ -260,7 +234,6 @@ function HangisiDahaKoyuContent() {
       correct: 'doğru!', wrong: 'yanlış',
       dailyComplete: 'günlük tamamlandı!',
       alreadyDaily: 'bugün bu modu oynadın.',
-      share: 'paylaş', copied: 'kopyalandı ✓',
     },
     en: {
       title: 'which is darker?',
@@ -276,7 +249,6 @@ function HangisiDahaKoyuContent() {
       correct: 'correct!', wrong: 'wrong',
       dailyComplete: 'daily complete!',
       alreadyDaily: 'You already played today.',
-      share: 'share', copied: 'copied ✓',
     },
   }[lang]
 
@@ -286,29 +258,38 @@ function HangisiDahaKoyuContent() {
     zor: { tr: 'zor', en: 'hard' },
   }
 
-  const handleShare = async () => {
-    if (!mode) return
-    const text = generateShareText(
-      'hangisi-daha-koyu',
-      mode,
-      score,
-      { lang, streak: streak > 0 ? streak : undefined },
-    )
-    const ok = await copyToClipboard(text)
-    if (ok) {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    }
-  }
+  const helpIsDaily = mode === 'daily' || (!mode && modParam === 'gunluk')
+  const helpFabTitle = lang === 'tr' ? 'nasıl oynanır?' : 'how to play'
+  const helpFabAria = lang === 'tr' ? 'nasıl oynanır' : 'how to play'
+  const helpFabSteps = helpIsDaily
+    ? (lang === 'tr' ? [
+        { text: 'Günlük görevde herkes aynı 10 soruyu görür.' },
+        { text: 'İki kutudan daha koyu olanı seç; 3 can hakkın var.' },
+        { text: 'Hızlı cevap bonus puan kazandırır.' },
+        { text: '10 soruyu bitir veya canların bitince skorunu gör.' },
+      ] : [
+        { text: 'In daily mode everyone gets the same 10 questions.' },
+        { text: 'Tap the darker swatch; you have 3 lives.' },
+        { text: 'Answering fast earns bonus points.' },
+        { text: 'Finish all 10 or end when you run out of lives.' },
+      ])
+    : (lang === 'tr' ? [
+        { text: 'İki renkten daha koyu olanı seç.' },
+        { text: '3 canın var; yanlışta can azalır, sıfırda oyun biter.' },
+        { text: 'Hızlı seçim ekstra puan verir.' },
+        { text: 'Zorluk seviyesi renklerin birbirine yakınlığını değiştirir.' },
+      ] : [
+        { text: 'Choose which of the two colors is darker.' },
+        { text: 'You have 3 lives; a wrong answer costs one.' },
+        { text: 'Quick answers give extra points.' },
+        { text: 'Difficulty changes how close the colors are.' },
+      ])
 
   return (
     <GameLayout
       lang={lang}
       onLangChange={setLang}
-      onBack={mode !== null || phase !== 'menu'
-        ? () => { setPhase('menu'); setMode(null) }
-        : undefined}
-      backLabel={t.menu}
+      streak={readStreak()}
     >
       <div style={{
         flex: 1,
@@ -517,21 +498,19 @@ function HangisiDahaKoyuContent() {
             }}>
               <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t.question}</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                {mode === 'endless' && (
-                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                    {[0, 1, 2].map(i => (
-                      <div
-                        key={i}
-                        style={{
-                          width: 8, height: 8, borderRadius: '50%',
-                          background: i < lives ? '#E24B4A' : 'var(--bg-secondary)',
-                          border: '0.5px solid var(--border)',
-                        }}
-                      />
-                    ))}
-                    <span style={{ fontSize: 10, color: 'var(--text-tertiary)', marginLeft: 4 }}>{t.lives}</span>
-                  </div>
-                )}
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  {[0, 1, 2].map(i => (
+                    <div
+                      key={i}
+                      style={{
+                        width: 8, height: 8, borderRadius: '50%',
+                        background: i < lives ? '#E24B4A' : 'var(--bg-secondary)',
+                        border: '0.5px solid var(--border)',
+                      }}
+                    />
+                  ))}
+                  <span style={{ fontSize: 10, color: 'var(--text-tertiary)', marginLeft: 4 }}>{t.lives}</span>
+                </div>
                 <div style={{ display: 'flex', gap: 20 }}>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 18, fontWeight: 500 }}>{score}</div>
@@ -603,93 +582,80 @@ function HangisiDahaKoyuContent() {
 
         {/* RESULT */}
         {phase === 'result' && (
-          <>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                {mode === 'daily' ? t.dailyComplete : t.result}
-              </div>
+          <GameResult
+            lang={lang}
+            score={score}
+            scoreLabel={lang === 'tr' ? 'toplam puan' : 'total score'}
+            scoreColor={
+              score >= 800 ? '#a8e063'
+                : score >= 400 ? '#EF9F27'
+                  : 'var(--text-primary)'
+            }
+            subtitle={
+              score >= 800
+                ? (lang === 'tr' ? 'mükemmel!' : 'perfect!')
+                : score >= 400
+                  ? (lang === 'tr' ? 'iyi!' : 'good!')
+                  : lang === 'tr' ? 'tekrar dene' : 'try again'
+            }
+            topContent={(
               <div style={{
-                fontSize: 64, fontWeight: 500,
-                letterSpacing: '-2px', lineHeight: 1,
-                marginBottom: 4,
-                color: score >= 90 ? '#a8e063' : score >= 70 ? '#EF9F27' : 'var(--text-primary)',
-              }}>
-                {displayScore}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t.totalScore}</div>
-            </div>
-
-            {mode === 'endless' && (
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 4 }}>
-                {[0, 1, 2].map(i => (
-                  <div
-                    key={i}
-                    style={{
-                      width: 10, height: 10, borderRadius: '50%',
-                      background: i < lives ? '#E24B4A' : 'var(--bg-tertiary)',
-                      border: '0.5px solid var(--border)',
+                display: 'flex', gap: 10,
+                width: '100%', marginBottom: 8,
+              }}
+              >
+                {[
+                  { val: streak, lbl: lang === 'tr' ? 'seri' : 'streak' },
+                  { val: bestStreak, lbl: lang === 'tr' ? 'en iyi seri' : 'best streak' },
+                ].map(({ val, lbl }) => (
+                  <div key={lbl} style={{
+                    flex: 1, padding: '16px',
+                    background: 'var(--bg-secondary)',
+                    borderRadius: 10,
+                    border: '0.5px solid var(--border)',
+                    textAlign: 'center',
+                  }}
+                  >
+                    <div style={{
+                      fontSize: 28, fontWeight: 700,
+                      color: 'var(--text-primary)',
+                      marginBottom: 4,
                     }}
-                  />
+                    >
+                      {val}
+                    </div>
+                    <div style={{
+                      fontSize: 11,
+                      color: 'var(--text-tertiary)',
+                    }}
+                    >
+                      {lbl}
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
-
-            <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
-              {[
-                { val: streak, lbl: t.streak },
-                { val: bestStreak, lbl: t.best },
-              ].map(({ val, lbl }) => (
-                <div key={lbl} style={{
-                  textAlign: 'center',
-                  padding: '16px 24px',
-                  border: '0.5px solid var(--border)',
-                  borderRadius: 'var(--radius-lg)',
-                  background: 'var(--bg-secondary)',
-                  minWidth: 100,
-                }}>
-                  <div style={{ fontSize: 24, fontWeight: 500, marginBottom: 4 }}>{val}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{lbl}</div>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', marginTop: 8 }}>
-              <button
-                className="btn-press"
-                type="button"
-                onClick={() => {
-                  if (mode === 'daily' && dailyPlayed) return
-                  startGame(mode!)
-                }}
-                disabled={mode === 'daily' && dailyPlayed}
-                style={{
-                  ...gamePrimaryButtonStyle,
-                  cursor: mode === 'daily' && dailyPlayed ? 'not-allowed' : 'pointer',
-                  opacity: mode === 'daily' && dailyPlayed ? 0.45 : 1,
-                }}
-              >
-                {t.again}
-              </button>
-              <button
-                type="button"
-                onClick={handleShare}
-                style={gameSecondaryButtonStyle}
-              >
-                {copied ? t.copied : t.share}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setPhase('menu'); setMode(null) }}
-                style={gameSecondaryButtonStyle}
-              >
-                {t.menu}
-              </button>
-            </div>
-          </>
+            primaryAction={{
+              label: lang === 'tr' ? 'tekrar oyna' : 'play again',
+              onClick: () => startGame(mode!),
+              disabled: mode === 'daily' && dailyPlayed,
+            }}
+            secondaryAction={{
+              label: lang === 'tr' ? 'paylaş' : 'share',
+              onClick: () => {
+                const text = lang === 'tr'
+                  ? `renkle — hangisi daha koyu?\n${score} puan · ${streak} seri\nrenkle.vercel.app`
+                  : `renkle — which is darker?\n${score} pts · ${streak} streak\nrenkle.vercel.app`
+                void navigator.clipboard.writeText(text)
+              },
+            }}
+            currentSlug="hangisi-daha-koyu"
+          />
         )}
         </div>
         </div>
       </div>
+      <HowToPlayFab title={helpFabTitle} ariaLabel={helpFabAria} steps={helpFabSteps} />
     </GameLayout>
   )
 }

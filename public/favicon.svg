@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="h" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="hsl(0,100%,60%)"/>
+      <stop offset="25%" stop-color="hsl(90,100%,60%)"/>
+      <stop offset="50%" stop-color="hsl(180,100%,60%)"/>
+      <stop offset="75%" stop-color="hsl(270,100%,60%)"/>
+      <stop offset="100%" stop-color="hsl(360,100%,60%)"/>
+    </linearGradient>
+  </defs>
+  <circle cx="16" cy="16" r="16" fill="url(#h)"/>
+</svg>

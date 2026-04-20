@@ -4,13 +4,15 @@ import { Suspense, useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import GameLayout from '@/components/GameLayout'
+import { readStreak } from '@/lib/streak'
 import { getLocalDayKey } from '@/lib/colorHistory'
 import {
   gameContentWrapperStyle,
   gamePrimaryButtonStyle,
   gameSecondaryButtonStyle,
 } from '@/lib/gamePageStyles'
-import { copyToClipboard, generateShareText } from '@/lib/share'
+import GameResult from '@/components/GameResult'
+import HowToPlayFab from '@/components/HowToPlayFab'
 
 const LS_RENK_DAILY = 'renkle-renk-karistir-daily'
 
@@ -87,9 +89,7 @@ function RenkKaristirContent() {
   const [dailyPlayed, setDailyPlayed] = useState(false)
   const [dailyHydrated, setDailyHydrated] = useState(false)
   const dailySavedRef = useRef(false)
-  const [copied, setCopied] = useState(false)
   const [answerAnim, setAnswerAnim] = useState<'correct' | 'wrong' | null>(null)
-  const [displayScore, setDisplayScore] = useState(0)
 
   useEffect(() => { setTimeout(() => setMounted(true), 50) }, [])
 
@@ -139,25 +139,6 @@ function RenkKaristirContent() {
       queueMicrotask(() => setDailyPlayed(true))
     } catch { /* ignore */ }
   }, [phase, mode, score])
-
-  useEffect(() => {
-    if (phase !== 'result') return
-    const target = score
-    const duration = 1200
-    const steps = 60
-    const increment = target / steps
-    let current = 0
-    const timer = setInterval(() => {
-      current += increment
-      if (current >= target) {
-        setDisplayScore(target)
-        clearInterval(timer)
-      } else {
-        setDisplayScore(Math.floor(current))
-      }
-    }, duration / steps)
-    return () => clearInterval(timer)
-  }, [phase, score])
 
   const maxPaints = difficulty === 'kolay' ? 2 : difficulty === 'orta' ? 3 : 4
   const mixed = mixPaints(addedPaints)
@@ -220,7 +201,6 @@ function RenkKaristirContent() {
       add: 'ekle', maxReached: 'maksimum renk eklendi',
       kolay: 'kolay', orta: 'orta', zor: 'zor',
       perfect: 'mükemmel!', good: 'iyi!', bad: 'yanlış!',
-      share: 'paylaş', copied: 'kopyalandı ✓',
       alreadyDaily: 'bugün bu modu oynadın.',
     },
     en: {
@@ -237,7 +217,6 @@ function RenkKaristirContent() {
       add: 'add', maxReached: 'max colors added',
       kolay: 'easy', orta: 'medium', zor: 'hard',
       perfect: 'perfect!', good: 'good!', bad: 'wrong!',
-      share: 'share', copied: 'copied ✓',
       alreadyDaily: 'You already played today.',
     },
   }[lang]
@@ -248,29 +227,38 @@ function RenkKaristirContent() {
     zor: { tr: 'zor', en: 'hard' },
   }
 
-  const handleShare = async () => {
-    if (!mode) return
-    const text = generateShareText(
-      'renk-karistir',
-      mode,
-      score,
-      { lang, rounds: totalRounds },
-    )
-    const ok = await copyToClipboard(text)
-    if (ok) {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    }
-  }
+  const helpIsDaily = mode === 'daily' || (!mode && modParam === 'gunluk')
+  const helpFabTitle = lang === 'tr' ? 'nasıl oynanır?' : 'how to play'
+  const helpFabAria = lang === 'tr' ? 'nasıl oynanır' : 'how to play'
+  const helpFabSteps = helpIsDaily
+    ? (lang === 'tr' ? [
+        { text: 'Her gün herkes aynı 5 hedef rengi görür.' },
+        { text: 'Palleteki boyaları ekleyerek karışımını hedefe yaklaştır.' },
+        { text: 'Zorluğa göre tur başına en fazla 2–4 renk ekleyebilirsin.' },
+        { text: '%70 ve üzeri yakınlık turu kazandırır; 3 canın var.' },
+      ] : [
+        { text: 'Everyone gets the same 5 target colors each day.' },
+        { text: 'Add paints from the palette to match the target mix.' },
+        { text: 'Per round you can add up to 2–4 paints (by difficulty).' },
+        { text: '70%+ similarity wins the round; you have 3 lives.' },
+      ])
+    : (lang === 'tr' ? [
+        { text: 'Boyaları ekleyerek hedef rengi yaklaştır.' },
+        { text: 'Karışım, seçilen renklerin ortalamasıdır.' },
+        { text: '%70 üzeri başarı turu kazandırır; 5 tur oynarsın.' },
+        { text: 'Canların bitince oyun biter.' },
+      ] : [
+        { text: 'Mix paints to get close to the target color.' },
+        { text: 'Your mix is the average of the paints you picked.' },
+        { text: '70%+ similarity clears a round; play 5 rounds.' },
+        { text: 'The game ends when you run out of lives.' },
+      ])
 
   return (
     <GameLayout
       lang={lang}
       onLangChange={setLang}
-      onBack={mode !== null || phase !== 'menu'
-        ? () => { setPhase('menu'); setMode(null) }
-        : undefined}
-      backLabel={t.menu}
+      streak={readStreak()}
     >
       <div style={{
         flex: 1,
@@ -674,60 +662,43 @@ function RenkKaristirContent() {
 
         {/* RESULT */}
         {phase === 'result' && (
-          <>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                {t.result}
-              </div>
-              <div style={{
-                fontSize: 64, fontWeight: 500,
-                letterSpacing: '-2px', lineHeight: 1, marginBottom: 4,
-                color: score >= 90 ? '#a8e063' : score >= 70 ? '#EF9F27' : 'var(--text-primary)',
-              }}>
-                {displayScore}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                {t.totalScore}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', marginTop: 16 }}>
-              <button
-                className="btn-press"
-                type="button"
-                onClick={() => {
-                  if (mode === 'daily' && dailyPlayed) return
-                  startGame(mode!)
-                }}
-                disabled={mode === 'daily' && dailyPlayed}
-                style={{
-                  ...gamePrimaryButtonStyle,
-                  cursor: mode === 'daily' && dailyPlayed ? 'not-allowed' : 'pointer',
-                  opacity: mode === 'daily' && dailyPlayed ? 0.45 : 1,
-                }}
-              >
-                {t.again}
-              </button>
-              <button
-                type="button"
-                onClick={handleShare}
-                style={gameSecondaryButtonStyle}
-              >
-                {copied ? t.copied : t.share}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setPhase('menu'); setMode(null) }}
-                style={gameSecondaryButtonStyle}
-              >
-                {t.menu}
-              </button>
-            </div>
-          </>
+          <GameResult
+            lang={lang}
+            score={score}
+            scoreLabel={lang === 'tr' ? 'toplam puan' : 'total score'}
+            scoreColor={
+              score >= 400 ? '#a8e063'
+                : score >= 200 ? '#EF9F27'
+                  : 'var(--text-primary)'
+            }
+            subtitle={
+              score >= 400
+                ? (lang === 'tr' ? 'mükemmel!' : 'perfect!')
+                : score >= 200
+                  ? (lang === 'tr' ? 'iyi!' : 'good!')
+                  : lang === 'tr' ? 'tekrar dene' : 'try again'
+            }
+            primaryAction={{
+              label: lang === 'tr' ? 'tekrar oyna' : 'play again',
+              onClick: () => startGame(mode!),
+              disabled: mode === 'daily' && dailyPlayed,
+            }}
+            secondaryAction={{
+              label: lang === 'tr' ? 'paylaş' : 'share',
+              onClick: () => {
+                const text = lang === 'tr'
+                  ? `renkle — renk karıştır\n${score} puan · ${round} tur\nrenkle.vercel.app`
+                  : `renkle — mix colors\n${score} pts · ${round} rounds\nrenkle.vercel.app`
+                void navigator.clipboard.writeText(text)
+              },
+            }}
+            currentSlug="renk-karistir"
+          />
         )}
         </div>
         </div>
       </div>
+      <HowToPlayFab title={helpFabTitle} ariaLabel={helpFabAria} steps={helpFabSteps} />
     </GameLayout>
   )
 }
