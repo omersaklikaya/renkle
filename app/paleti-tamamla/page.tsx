@@ -1,6 +1,6 @@
-'use client'
+  'use client'
 
-import { Suspense, useState, useEffect, useCallback } from 'react'
+import { Suspense, useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import GameResult from '@/components/GameResult'
@@ -132,6 +132,11 @@ function PaletiTamamlaContent() {
   const [dailyScore, setDailyScore] = useState<number | null>(null)
   const [displayScore, setDisplayScore] = useState(0)
   const [isTouchPrimary, setIsTouchPrimary] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+  const phaseRef = useRef(phase)
+  const pushedRef = useRef(false)
+
+  useEffect(() => { phaseRef.current = phase }, [phase])
 
   useEffect(() => {
     setTimeout(() => setMounted(true), 50)
@@ -146,6 +151,47 @@ function PaletiTamamlaContent() {
       }
     } catch { /* ignore */ }
     setDailyHydrated(true)
+  }, [])
+
+  // Browser back/gesture while playing -> return to menu instead of home
+  useEffect(() => {
+    if (phase === 'playing' && !pushedRef.current) {
+      try { window.history.pushState({ renkle: 'paleti-tamamla-playing' }, '') } catch { /* ignore */ }
+      pushedRef.current = true
+    }
+    if (phase === 'menu') pushedRef.current = false
+  }, [phase])
+
+  useEffect(() => {
+    const onPop = () => {
+      if (phaseRef.current !== 'playing') return
+      setPhase('menu')
+      setMode(null)
+      setShowFeedback(false)
+      setSelected(null)
+      setDraggedColor(null)
+      setDragOver(false)
+      try { window.history.pushState({ renkle: 'paleti-tamamla-menu' }, '') } catch { /* ignore */ }
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 520px)')
+    const update = () => setIsMobile(mq.matches)
+    update()
+    try {
+      mq.addEventListener('change', update)
+      return () => mq.removeEventListener('change', update)
+    } catch {
+      // Safari fallback
+      // eslint-disable-next-line deprecation/deprecation
+      mq.addListener(update)
+      // eslint-disable-next-line deprecation/deprecation
+      return () => mq.removeListener(update)
+    }
   }, [])
 
   useEffect(() => {
@@ -391,17 +437,17 @@ function PaletiTamamlaContent() {
                       ? 'transparent'
                       : colorToCss(c),
                     border: i === 2
-                      ? '2px dashed rgba(255,255,255,0.2)'
+                      ? '2px dashed var(--border-mid)'
                       : 'none',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}
                 >
-                  {i === 2 && <span style={{ fontSize: 18, color: 'rgba(255,255,255,0.3)' }}>?</span>}
+                  {i === 2 && <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-tertiary)' }}>?</span>}
                 </div>
               ))}
             </div>
 
-            <div style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: 12, textAlign: 'center' }}>
               <div style={{
                 fontSize: 18, fontWeight: 500,
                 color: 'var(--text-primary)',
@@ -429,6 +475,7 @@ function PaletiTamamlaContent() {
                   borderRadius: 12,
                   padding: 4,
                   display: 'flex',
+                  flexDirection: isMobile ? 'column' : 'row',
                   gap: 3,
                   border: '0.5px solid var(--border)',
                 }}
@@ -450,8 +497,9 @@ function PaletiTamamlaContent() {
                         }
                       }}
                       style={{
-                        flex: 1,
-                        padding: '10px 0',
+                        flex: isMobile ? 'none' : 1,
+                        width: isMobile ? '100%' : undefined,
+                        padding: isMobile ? '10px 12px' : '10px 0',
                         borderRadius: 9,
                         textAlign: 'center',
                         cursor: 'pointer',
@@ -460,19 +508,21 @@ function PaletiTamamlaContent() {
                           ? '0.5px solid var(--border-mid)'
                           : '0.5px solid transparent',
                         transition: 'all 0.15s',
+                        minHeight: 56,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                       }}
                     >
                       <div style={{
-                        fontSize: 12,
+                        fontSize: 13,
                         color: difficulty === d ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                        fontWeight: difficulty === d ? 500 : 400,
-                        marginBottom: 2,
+                        fontWeight: difficulty === d ? 600 : 500,
+                        letterSpacing: '-0.2px',
+                        lineHeight: 1.2,
                       }}
                       >
-                        {diffLabel[d][lang]}
-                      </div>
-                      <div style={{ fontSize: 9, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                        {sub[lang]}
+                        {diffLabel[d][lang]}, {sub[lang]}
                       </div>
                     </div>
                   ))}
@@ -486,9 +536,14 @@ function PaletiTamamlaContent() {
                   padding: '14px 12px',
                   border: '0.5px solid var(--border)',
                   flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
                 }}
                 >
-                  <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+                  <div style={{ display: 'flex', gap: 4, marginBottom: 10, justifyContent: 'center' }}>
                     {[0, 1, 2].map(i => (
                       <svg key={i} width="16" height="16" viewBox="0 0 16 16" style={{ animation: 'heartBeat 1.8s ease infinite', animationDelay: `${i * 0.2}s` }}>
                         <path d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5C1.5 3.5 3 2 5 2C6.2 2 7.2 2.6 8 3.5C8.8 2.6 9.8 2 11 2C13 2 14.5 3.5 14.5 5.5C14.5 9.5 8 13.5 8 13.5Z" fill="#E24B4A" />
@@ -505,6 +560,11 @@ function PaletiTamamlaContent() {
                   padding: '14px 12px',
                   border: '0.5px solid var(--border)',
                   flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
                 }}
                 >
                   <div style={{ fontSize: 26, fontWeight: 500, color: 'var(--text-primary)', letterSpacing: '-1px', marginBottom: 6, lineHeight: 1 }}>5</div>
@@ -518,19 +578,26 @@ function PaletiTamamlaContent() {
                   padding: '14px 12px',
                   border: '0.5px solid var(--border)',
                   flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
                 }}
                 >
-                  <div style={{ marginBottom: 10 }}>
+                  <div style={{ marginBottom: 10, display: 'flex', justifyContent: 'center', width: '100%' }}>
                     <div style={{ display: 'flex', gap: 3, marginBottom: 4 }}>
                       <div style={{ width: 20, height: 20, borderRadius: 4, background: '#EF9F27' }} />
                       <div style={{ width: 4, color: 'var(--text-tertiary)', fontSize: 10, display: 'flex', alignItems: 'center' }}>→</div>
-                      <div style={{ width: 20, height: 20, borderRadius: 4, border: '1.5px dashed rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>?</span>
+                      <div style={{ width: 20, height: 20, borderRadius: 4, border: '1.5px dashed var(--border-mid)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-secondary)' }}>
+                        <span style={{ fontSize: 10, color: 'var(--text-tertiary)', fontWeight: 700 }}>?</span>
                       </div>
                     </div>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-                    {lang === 'tr' ? 'sürükle & bırak' : 'drag & drop'}
+                    {isTouchPrimary
+                      ? (lang === 'tr' ? 'dokun & seç' : 'tap & pick')
+                      : (lang === 'tr' ? 'sürükle & bırak' : 'drag & drop')}
                   </div>
                 </div>
               </div>
@@ -555,10 +622,10 @@ function PaletiTamamlaContent() {
         {/* PLAYING */}
         {phase === 'playing' && (
           <div style={{
-            maxWidth: 560,
+            maxWidth: isMobile ? 560 : 640,
             margin: '0 auto',
             width: '100%',
-            padding: '32px var(--page-padding)',
+            padding: isMobile ? '22px var(--page-padding) 40px' : '40px var(--page-padding) 48px',
             boxSizing: 'border-box',
             display: 'flex',
             flexDirection: 'column',
@@ -610,14 +677,14 @@ function PaletiTamamlaContent() {
                   const emptyBg = showFeedback && isEmpty
                     ? colorToCss(correct)
                     : isEmpty
-                      ? (dragOver ? 'rgba(255,255,255,0.08)' : 'transparent')
+                      ? (dragOver ? 'rgba(255,255,255,0.08)' : 'var(--bg-secondary)')
                       : colorToCss(color)
                   const emptyBorder = showFeedback && isEmpty
                     ? (isCorrect ? '2px solid #a8e063' : '2px solid #E24B4A')
                     : isEmpty
                       ? (dragOver
-                        ? '2px dashed rgba(255,255,255,0.4)'
-                        : '2px dashed rgba(255,255,255,0.2)')
+                        ? '2px dashed var(--text-secondary)'
+                        : '2px dashed var(--text-tertiary)')
                       : '0.5px solid var(--border)'
                   return (
                     <div
@@ -631,7 +698,7 @@ function PaletiTamamlaContent() {
                       } : undefined}
                       style={{
                         flex: 1,
-                        height: 80,
+                        height: isMobile ? 92 : 104,
                         borderRadius: 10,
                         background: emptyBg,
                         border: emptyBorder,
@@ -640,8 +707,15 @@ function PaletiTamamlaContent() {
                         justifyContent: 'center',
                         transition: 'all 0.15s',
                         position: 'relative',
+                        boxShadow: isEmpty
+                          ? 'inset 0 0 0 1px rgba(255,255,255,0.10), inset 0 0 0 2px rgba(0,0,0,0.06)'
+                          : undefined,
                       }}
-                    />
+                    >
+                      {isEmpty && !showFeedback && (
+                        <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-tertiary)' }}>?</span>
+                      )}
+                    </div>
                   )
                 })}
               </div>
@@ -650,10 +724,10 @@ function PaletiTamamlaContent() {
             {/* Seçenekler */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: difficulty === 'zor' ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)',
-              gap: 8,
+              gridTemplateColumns: isMobile ? '1fr' : (difficulty === 'zor' ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)'),
+              gap: isMobile ? 10 : 8,
               width: '100%',
-              marginTop: 24,
+              marginTop: isMobile ? 18 : 24,
             }}
             >
               {options.map((opt, i) => {
@@ -675,6 +749,7 @@ function PaletiTamamlaContent() {
                     draggable={!showFeedback}
                     onDragStart={() => setDraggedColor(opt)}
                     onDragEnd={() => setDraggedColor(null)}
+                    onTouchStart={(e) => e.stopPropagation()}
                     onClick={isTouchPrimary && !showFeedback ? () => handleAnswer(opt) : undefined}
                     role={isTouchPrimary ? 'button' : undefined}
                     tabIndex={isTouchPrimary && !showFeedback ? 0 : undefined}
@@ -685,11 +760,12 @@ function PaletiTamamlaContent() {
                       }
                     } : undefined}
                     style={{
-                      height: 80,
+                      height: isMobile ? 92 : 104,
                       borderRadius: 10,
                       background: colorToCss(opt),
                       cursor: showFeedback ? 'default' : 'grab',
                       border: optionBorder,
+                      boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.12), inset 0 0 0 2px rgba(0,0,0,0.06)',
                       transition: 'all 0.15s',
                       transform: isDraggingThis ? 'scale(0.95)' : 'scale(1)',
                       opacity: isDraggingThis

@@ -101,8 +101,26 @@ function HangisiDahaKoyuContent() {
   const dailySavedRef = useRef(false)
   const [lives, setLives] = useState(3)
   const [answerAnim, setAnswerAnim] = useState<'correct' | 'wrong' | null>(null)
+  const answeringRef = useRef(false)
+  const [isMobile, setIsMobile] = useState(false)
 
   useEffect(() => { setTimeout(() => setMounted(true), 50) }, [])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 520px)')
+    const update = () => setIsMobile(mq.matches)
+    update()
+    try {
+      mq.addEventListener('change', update)
+      return () => mq.removeEventListener('change', update)
+    } catch {
+      // Safari fallback
+      // eslint-disable-next-line deprecation/deprecation
+      mq.addListener(update)
+      // eslint-disable-next-line deprecation/deprecation
+      return () => mq.removeListener(update)
+    }
+  }, [])
 
   const startGame = useCallback((m: Mode) => {
     if (m === 'daily' && dailyPlayed) return
@@ -166,6 +184,8 @@ function HangisiDahaKoyuContent() {
 
   const handleChoice = (choice: 'left' | 'right') => {
     if (!currentPair || gameOver) return
+    if (answeringRef.current) return
+    answeringRef.current = true
 
     const [left, right] = currentPair
     const leftBrightness = getBrightness(left)
@@ -213,11 +233,19 @@ function HangisiDahaKoyuContent() {
               setPhase('result')
             })
           }
+          // oyun bitmediyse tekrar denemeye izin ver
+          if (n > 0) queueMicrotask(() => { answeringRef.current = false })
           return n
         })
       }, 600)
     }
   }
+
+  useEffect(() => {
+    if (phase !== 'playing') return
+    // sonraki soruya geçince yeniden tıklanabilir yap
+    answeringRef.current = false
+  }, [phase, currentIndex])
 
   const t = {
     tr: {
@@ -342,7 +370,7 @@ function HangisiDahaKoyuContent() {
               ))}
             </div>
 
-            <div style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: 12, textAlign: 'center' }}>
               <div style={{
                 fontSize: 18, fontWeight: 500,
                 color: 'var(--text-primary)',
@@ -370,6 +398,7 @@ function HangisiDahaKoyuContent() {
                   borderRadius: 12,
                   padding: 4,
                   display: 'flex',
+                  flexDirection: isMobile ? 'column' : 'row',
                   gap: 3,
                   border: '0.5px solid var(--border)',
                 }}
@@ -391,8 +420,9 @@ function HangisiDahaKoyuContent() {
                         }
                       }}
                       style={{
-                        flex: 1,
-                        padding: '10px 0',
+                        flex: isMobile ? 'none' : 1,
+                        width: isMobile ? '100%' : undefined,
+                        padding: isMobile ? '10px 12px' : '10px 0',
                         borderRadius: 9,
                         textAlign: 'center',
                         cursor: 'pointer',
@@ -401,19 +431,21 @@ function HangisiDahaKoyuContent() {
                           ? '0.5px solid var(--border-mid)'
                           : '0.5px solid transparent',
                         transition: 'all 0.15s',
+                        minHeight: 56,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                       }}
                     >
                       <div style={{
-                        fontSize: 12,
+                        fontSize: 13,
                         color: difficulty === d ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                        fontWeight: difficulty === d ? 500 : 400,
-                        marginBottom: 2,
+                        fontWeight: difficulty === d ? 600 : 500,
+                        letterSpacing: '-0.2px',
+                        lineHeight: 1.2,
                       }}
                       >
-                        {diffLabel[d][lang]}
-                      </div>
-                      <div style={{ fontSize: 9, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                        {sub[lang]}
+                        {diffLabel[d][lang]}, {sub[lang]}
                       </div>
                     </div>
                   ))}
@@ -427,9 +459,14 @@ function HangisiDahaKoyuContent() {
                   padding: '14px 12px',
                   border: '0.5px solid var(--border)',
                   flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
                 }}
                 >
-                  <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+                  <div style={{ display: 'flex', gap: 4, marginBottom: 10, justifyContent: 'center' }}>
                     {[0, 1, 2].map(i => (
                       <svg key={i} width="16" height="16" viewBox="0 0 16 16" style={{ animation: 'heartBeat 1.8s ease infinite', animationDelay: `${i * 0.2}s` }}>
                         <path d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5C1.5 3.5 3 2 5 2C6.2 2 7.2 2.6 8 3.5C8.8 2.6 9.8 2 11 2C13 2 14.5 3.5 14.5 5.5C14.5 9.5 8 13.5 8 13.5Z" fill="#E24B4A" />
@@ -446,6 +483,11 @@ function HangisiDahaKoyuContent() {
                   padding: '14px 12px',
                   border: '0.5px solid var(--border)',
                   flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
                 }}
                 >
                   <div style={{ fontSize: 26, fontWeight: 500, color: 'var(--text-primary)', letterSpacing: '-1px', marginBottom: 6, lineHeight: 1 }}>∞</div>
@@ -459,9 +501,14 @@ function HangisiDahaKoyuContent() {
                   padding: '14px 12px',
                   border: '0.5px solid var(--border)',
                   flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
                 }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, marginBottom: 10, height: 28 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, marginBottom: 10, height: 28, justifyContent: 'center' }}>
                     {[40, 65, 100].map((h, i) => (
                       <div key={i} style={{ width: 7, borderRadius: 2, background: '#EF9F27', height: `${h}%` }} />
                     ))}
@@ -493,12 +540,18 @@ function HangisiDahaKoyuContent() {
         {phase === 'playing' && currentPair && (
           <>
             <div style={{
-              display: 'flex', alignItems: 'center',
-              justifyContent: 'space-between', width: '100%',
+              display: 'flex',
+              flexDirection: isMobile ? 'column' : 'row',
+              alignItems: isMobile ? 'stretch' : 'center',
+              justifyContent: 'space-between',
+              width: '100%',
+              gap: isMobile ? 10 : 0,
             }}>
-              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t.question}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <div style={{ fontSize: isMobile ? 14 : 13, fontWeight: isMobile ? 600 : 500, color: 'var(--text-secondary)' }}>
+                {t.question}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   {[0, 1, 2].map(i => (
                     <div
                       key={i}
@@ -509,15 +562,15 @@ function HangisiDahaKoyuContent() {
                       }}
                     />
                   ))}
-                  <span style={{ fontSize: 10, color: 'var(--text-tertiary)', marginLeft: 4 }}>{t.lives}</span>
+                  <span style={{ fontSize: 10, color: 'var(--text-tertiary)', marginLeft: 2 }}>{t.lives}</span>
                 </div>
-                <div style={{ display: 'flex', gap: 20 }}>
+                <div style={{ display: 'flex', gap: isMobile ? 14 : 20 }}>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 18, fontWeight: 500 }}>{score}</div>
+                    <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 600 }}>{score}</div>
                     <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{t.score}</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 18, fontWeight: 500 }}>{streak}</div>
+                    <div style={{ fontSize: isMobile ? 16 : 18, fontWeight: 600 }}>{streak}</div>
                     <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{t.streak}</div>
                   </div>
                 </div>
@@ -540,7 +593,12 @@ function HangisiDahaKoyuContent() {
             )}
 
             <div style={{
-              display: 'flex', gap: 12, width: '100%', position: 'relative',
+              display: 'flex',
+              flexDirection: isMobile ? 'column' : 'row',
+              gap: isMobile ? 10 : 14,
+              width: '100%',
+              position: 'relative',
+              marginTop: isMobile ? 10 : 16,
               animation: answerAnim === 'correct'
                 ? 'correctPulse 0.6s ease'
                 : answerAnim === 'wrong'
@@ -564,7 +622,11 @@ function HangisiDahaKoyuContent() {
                     key={side}
                     onClick={() => handleChoice(side)}
                     style={{
-                      flex: 1, height: 260, borderRadius: 'var(--radius-lg)',
+                      flex: isMobile ? '0 0 auto' : 1,
+                      width: isMobile ? '100%' : undefined,
+                      height: isMobile ? 180 : 320,
+                      minHeight: isMobile ? 180 : 320,
+                      borderRadius: 'var(--radius-lg)',
                       background: colorToCss(color),
                       cursor: gameOver ? 'default' : 'pointer',
                       border: isWrong
@@ -639,15 +701,6 @@ function HangisiDahaKoyuContent() {
               label: lang === 'tr' ? 'tekrar oyna' : 'play again',
               onClick: () => startGame(mode!),
               disabled: mode === 'daily' && dailyPlayed,
-            }}
-            secondaryAction={{
-              label: lang === 'tr' ? 'paylaş' : 'share',
-              onClick: () => {
-                const text = lang === 'tr'
-                  ? `renkle — hangisi daha koyu?\n${score} puan · ${streak} seri\nrenkle.vercel.app`
-                  : `renkle — which is darker?\n${score} pts · ${streak} streak\nrenkle.vercel.app`
-                void navigator.clipboard.writeText(text)
-              },
             }}
             currentSlug="hangisi-daha-koyu"
           />

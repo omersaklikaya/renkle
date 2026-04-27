@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import HowToPlay from '@/components/HowToPlay'
 
 interface HowToPlayFabProps {
@@ -12,6 +12,12 @@ interface HowToPlayFabProps {
 export default function HowToPlayFab({ title, steps, ariaLabel }: HowToPlayFabProps) {
   const [open, setOpen] = useState(false)
 
+  useEffect(() => {
+    const onOpen = () => setOpen(true)
+    window.addEventListener('renkle:howto-open', onOpen as EventListener)
+    return () => window.removeEventListener('renkle:howto-open', onOpen as EventListener)
+  }, [])
+
   return (
     <>
       {open && (
@@ -20,6 +26,7 @@ export default function HowToPlayFab({ title, steps, ariaLabel }: HowToPlayFabPr
       <button
         type="button"
         className="btn-press"
+        data-howto-fab="true"
         aria-label={ariaLabel}
         onClick={() => setOpen(true)}
         style={{

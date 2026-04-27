@@ -6,8 +6,8 @@ export type SiteThemePreference = 'system' | 'light' | 'dark'
 export const SITE_THEME_STORAGE_KEY = 'renkle-theme'
 
 export const SITE_THEME_ICONS: Record<SiteTheme, string> = {
-  light: '/favicon.svg',
-  dark: '/favicon.svg',
+  light: '/icons/lightmode.ico',
+  dark: '/icons/darkmode.ico',
 }
 
 const THEME_EVENT = 'renkle:theme'
@@ -81,14 +81,17 @@ export function applySiteThemeToDocument(theme: SiteTheme) {
   if (typeof document === 'undefined') return
   document.documentElement.dataset.theme = theme
 
-  const href = SITE_THEME_ICONS[theme]
+  const href = `${SITE_THEME_ICONS[theme]}?theme=${theme}`
   let link = document.querySelector<HTMLLinkElement>('link[rel="icon"][data-renkle-icon]')
+  if (!link) {
+    link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+  }
   if (!link) {
     link = document.createElement('link')
     link.rel = 'icon'
-    link.setAttribute('data-renkle-icon', 'true')
     document.head.appendChild(link)
   }
+  link.setAttribute('data-renkle-icon', 'true')
   link.href = href
 }
 

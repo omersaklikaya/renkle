@@ -90,8 +90,56 @@ function RenkKaristirContent() {
   const [dailyHydrated, setDailyHydrated] = useState(false)
   const dailySavedRef = useRef(false)
   const [answerAnim, setAnswerAnim] = useState<'correct' | 'wrong' | null>(null)
+  const [isMobile, setIsMobile] = useState(false)
+  const phaseRef = useRef(phase)
+  const modeRef = useRef(mode)
+  const pushedRef = useRef(false)
+
+  useEffect(() => { phaseRef.current = phase }, [phase])
+  useEffect(() => { modeRef.current = mode }, [mode])
 
   useEffect(() => { setTimeout(() => setMounted(true), 50) }, [])
+
+  // Browser back/gesture while playing -> return to menu instead of home
+  useEffect(() => {
+    if (phase === 'playing' && !pushedRef.current) {
+      try { window.history.pushState({ renkle: 'renk-karistir-playing' }, '') } catch { /* ignore */ }
+      pushedRef.current = true
+    }
+    if (phase === 'menu') pushedRef.current = false
+  }, [phase])
+
+  useEffect(() => {
+    const onPop = () => {
+      if (phaseRef.current !== 'playing') return
+      // cancel leaving; show difficulty/menu screen
+      setPhase('menu')
+      setMode(null)
+      setShowResult(false)
+      setAddedPaints([])
+      setRound(1)
+      setScore(0)
+      try { window.history.pushState({ renkle: 'renk-karistir-menu' }, '') } catch { /* ignore */ }
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 520px)')
+    const update = () => setIsMobile(mq.matches)
+    update()
+    try {
+      mq.addEventListener('change', update)
+      return () => mq.removeEventListener('change', update)
+    } catch {
+      // Safari fallback
+      // eslint-disable-next-line deprecation/deprecation
+      mq.addListener(update)
+      // eslint-disable-next-line deprecation/deprecation
+      return () => mq.removeListener(update)
+    }
+  }, [])
 
   useEffect(() => {
     try {
@@ -334,7 +382,7 @@ function RenkKaristirContent() {
               })}
             </div>
 
-            <div style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: 12, textAlign: 'center' }}>
               <div style={{
                 fontSize: 18, fontWeight: 500,
                 color: 'var(--text-primary)',
@@ -362,6 +410,7 @@ function RenkKaristirContent() {
                   borderRadius: 12,
                   padding: 4,
                   display: 'flex',
+                  flexDirection: isMobile ? 'column' : 'row',
                   gap: 3,
                   border: '0.5px solid var(--border)',
                 }}
@@ -383,8 +432,9 @@ function RenkKaristirContent() {
                         }
                       }}
                       style={{
-                        flex: 1,
-                        padding: '10px 0',
+                        flex: isMobile ? 'none' : 1,
+                        width: isMobile ? '100%' : undefined,
+                        padding: isMobile ? '10px 12px' : '10px 0',
                         borderRadius: 9,
                         textAlign: 'center',
                         cursor: 'pointer',
@@ -393,19 +443,21 @@ function RenkKaristirContent() {
                           ? '0.5px solid var(--border-mid)'
                           : '0.5px solid transparent',
                         transition: 'all 0.15s',
+                        minHeight: 56,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                       }}
                     >
                       <div style={{
-                        fontSize: 12,
+                        fontSize: 13,
                         color: difficulty === d ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                        fontWeight: difficulty === d ? 500 : 400,
-                        marginBottom: 2,
+                        fontWeight: difficulty === d ? 600 : 500,
+                        letterSpacing: '-0.2px',
+                        lineHeight: 1.2,
                       }}
                       >
-                        {diffLabel[d][lang]}
-                      </div>
-                      <div style={{ fontSize: 9, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                        {sub[lang]}
+                        {diffLabel[d][lang]}, {sub[lang]}
                       </div>
                     </div>
                   ))}
@@ -419,9 +471,14 @@ function RenkKaristirContent() {
                   padding: '14px 12px',
                   border: '0.5px solid var(--border)',
                   flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
                 }}
                 >
-                  <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+                  <div style={{ display: 'flex', gap: 4, marginBottom: 10, justifyContent: 'center' }}>
                     {[0, 1, 2].map(i => (
                       <svg key={i} width="16" height="16" viewBox="0 0 16 16" style={{ animation: 'heartBeat 1.8s ease infinite', animationDelay: `${i * 0.2}s` }}>
                         <path d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5C1.5 3.5 3 2 5 2C6.2 2 7.2 2.6 8 3.5C8.8 2.6 9.8 2 11 2C13 2 14.5 3.5 14.5 5.5C14.5 9.5 8 13.5 8 13.5Z" fill="#E24B4A" />
@@ -438,6 +495,11 @@ function RenkKaristirContent() {
                   padding: '14px 12px',
                   border: '0.5px solid var(--border)',
                   flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
                 }}
                 >
                   <div style={{ fontSize: 26, fontWeight: 500, color: 'var(--text-primary)', letterSpacing: '-1px', marginBottom: 6, lineHeight: 1 }}>5</div>
@@ -451,9 +513,14 @@ function RenkKaristirContent() {
                   padding: '14px 12px',
                   border: '0.5px solid var(--border)',
                   flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
                 }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, marginBottom: 10, height: 28 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, marginBottom: 10, height: 28, justifyContent: 'center', width: '100%' }}>
                     <div style={{ width: '70%', height: 4, background: '#1D9E75', borderRadius: 2 }} />
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
@@ -504,7 +571,10 @@ function RenkKaristirContent() {
 
             {/* Hedef + Karışım yan yana */}
             <div style={{
-              display: 'flex', gap: 10, width: '100%',
+              display: 'flex',
+              flexDirection: isMobile ? 'column' : 'row',
+              gap: 10,
+              width: '100%',
               animation: answerAnim === 'correct'
                 ? 'correctPulse 0.6s ease'
                 : answerAnim === 'wrong'
@@ -629,7 +699,7 @@ function RenkKaristirContent() {
             </div>
 
             {/* Butonlar */}
-            <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+            <div style={{ display: 'flex', gap: 8, width: '100%', marginTop: 18 }}>
               <button
                 type="button"
                 onClick={removeLast}
@@ -682,15 +752,6 @@ function RenkKaristirContent() {
               label: lang === 'tr' ? 'tekrar oyna' : 'play again',
               onClick: () => startGame(mode!),
               disabled: mode === 'daily' && dailyPlayed,
-            }}
-            secondaryAction={{
-              label: lang === 'tr' ? 'paylaş' : 'share',
-              onClick: () => {
-                const text = lang === 'tr'
-                  ? `renkle — renk karıştır\n${score} puan · ${round} tur\nrenkle.vercel.app`
-                  : `renkle — mix colors\n${score} pts · ${round} rounds\nrenkle.vercel.app`
-                void navigator.clipboard.writeText(text)
-              },
             }}
             currentSlug="renk-karistir"
           />

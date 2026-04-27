@@ -13,6 +13,7 @@ const OTHER_SLUGS = [
   'hangisi-daha-koyu',
   'renk-karistir',
   'paleti-tamamla',
+  'marka-rengi-bil',
 ] as const
 
 type OtherSlug = (typeof OTHER_SLUGS)[number]
@@ -79,13 +80,25 @@ const OTHER_BY_SLUG: Record<OtherSlug, OtherGameDef> = {
         <div style={{ flex: 1, height: 28, borderRadius: 4, background: '#EF9F27' }} />
         <div style={{
           flex: 1, height: 28, borderRadius: 4,
-          border: '1.5px dashed rgba(255,255,255,0.2)',
+          border: '1.5px dashed rgba(255,255,255,0.18)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}
         >
-          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>?</span>
+          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)' }}>?</span>
         </div>
         <div style={{ flex: 1, height: 28, borderRadius: 4, background: '#412402' }} />
+      </div>
+    ),
+  },
+  'marka-rengi-bil': {
+    slug: 'marka-rengi-bil',
+    mod: 'sinirsiz',
+    label: { tr: 'tahmin et', en: 'guess brand' },
+    swatch: (
+      <div style={{ height: 48, display: 'flex', overflow: 'hidden', borderRadius: '8px 8px 0 0' }}>
+        <div style={{ flex:1, background: '#E50914' }} />
+        <div style={{ flex:1, background: '#1DB954' }} />
+        <div style={{ flex:1, background: '#1877F2' }} />
       </div>
     ),
   },
@@ -116,16 +129,18 @@ export function GameResultOtherGamesGrid({
         {lang === 'tr' ? 'diğer oyunlar' : 'other games'}
       </div>
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
+        display: 'flex',
+        flexDirection: 'row',
         gap: 8,
+        flexWrap: 'wrap',
+        overflowX: 'hidden',
       }}
       >
         {otherGames.map(game => (
           <Link
             key={game.slug}
             href={`/${game.slug}?mod=${game.mod}`}
-            style={{ textDecoration: 'none', color: 'inherit' }}
+            style={{ textDecoration: 'none', color: 'inherit', flex: '1 1 200px', minWidth: 0 }}
           >
             <div style={{
               border: '0.5px solid var(--border)',

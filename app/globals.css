@@ -2,6 +2,30 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  /* Mobilde çift tıklama zoom'u engelle */
+  touch-action: manipulation;
+}
+
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/* Canvas elementleri için scroll engeli */
+canvas {
+  touch-action: none;
+}
+
+/* Sürüklenebilir elementler */
+[draggable="true"] {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+html {
+  /* View Transitions root snapshot */
+  view-transition-name: root;
 }
 
 :root {
@@ -31,7 +55,7 @@ html[data-theme='dark'] {
   --bg-tertiary: #242422;
   --text-primary: #f0ede8;
   --text-secondary: #8a8880;
-  --text-tertiary: #5a5856;
+  --text-tertiary: #7a7872;
   --border: rgba(255, 255, 255, 0.08);
   --border-mid: rgba(255, 255, 255, 0.14);
 }
@@ -44,7 +68,7 @@ html[data-theme='dark'] {
     --bg-tertiary: #242422;
     --text-primary: #f0ede8;
     --text-secondary: #8a8880;
-    --text-tertiary: #5a5856;
+    --text-tertiary: #7a7872;
     --border: rgba(255, 255, 255, 0.08);
     --border-mid: rgba(255, 255, 255, 0.14);
   }
@@ -59,6 +83,11 @@ html[data-theme='dark'] {
     --card-min: 100%;
     --swatch-height: 52px;
   }
+}
+
+/* Yardım butonu navbar'a taşınıyor */
+button[data-howto-fab="true"] {
+  display: none !important;
 }
 
 html, body {
@@ -82,6 +111,40 @@ body {
   letter-spacing: -0.1px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Theme transition — expanding circle (View Transitions API) */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-group(root) {
+    animation-duration: 520ms;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 520ms;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    animation-fill-mode: both;
+    mix-blend-mode: normal;
+  }
+
+  ::view-transition-old(root) {
+    animation-name: themeCircleOut;
+  }
+
+  ::view-transition-new(root) {
+    animation-name: themeCircleIn;
+  }
+
+  @keyframes themeCircleIn {
+    from { clip-path: circle(0px at var(--theme-vt-x, 50vw) var(--theme-vt-y, 50vh)); }
+    to { clip-path: circle(var(--theme-vt-r, 120vmax) at var(--theme-vt-x, 50vw) var(--theme-vt-y, 50vh)); }
+  }
+
+  @keyframes themeCircleOut {
+    from { clip-path: circle(var(--theme-vt-r, 120vmax) at var(--theme-vt-x, 50vw) var(--theme-vt-y, 50vh)); }
+    to { clip-path: circle(0px at var(--theme-vt-x, 50vw) var(--theme-vt-y, 50vh)); }
+  }
 }
 
 h1 {
@@ -328,6 +391,55 @@ html[data-theme='dark'] .rengi-mode-card__streak-num {
   }
 }
 
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(80px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes sheetUp {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes popDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -434,4 +546,34 @@ html[data-theme='dark'] .rengi-mode-card__streak-num {
 
 .game-card:hover .game-swatch {
   animation: swatchGlow 0.8s ease;
+}
+
+@keyframes fillRight {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+.oyna-btn {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.oyna-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.12);
+  transform: translateX(-100%);
+  transition: transform 0.35s cubic-bezier(0.16,1,0.3,1);
+  z-index: 0;
+}
+
+.oyna-btn:hover::before {
+  transform: translateX(0);
+}
+
+.oyna-btn span {
+  position: relative;
+  z-index: 1;
 }

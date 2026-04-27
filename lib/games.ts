@@ -44,9 +44,9 @@ export const games: Game[] = [
     slug: 'marka-rengi-bil',
     title: { tr: 'marka rengi bil', en: 'brand color quiz' },
     description: { tr: 'Bu renk hangi markaya ait?', en: 'Which brand owns this color?' },
-    swatchColors: ['#D3D1C7', '#F1EFE8'],
+    swatchColors: ['#E50914', '#1DB954', '#1877F2'],
     tag: 'endless',
-    locked: true,
+    locked: false,
   },
   {
     slug: 'gradient-sirala',

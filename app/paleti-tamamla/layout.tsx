@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
 
 export const metadata: Metadata = {
-  title: 'Paleti Tamamla — Renkle',
-  description: 'Eksik rengi sürükle, paleti tamamla.',
+  title: 'paleti tamamla — renkle',
+  description: 'eksik rengi sürükle, paleti tamamla.',
 }
 
 export default function Layout({ children }: { children: ReactNode }) {

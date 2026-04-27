@@ -106,7 +106,7 @@ const LS_ENDLESS = 'renkle-rengi-hatirla-endless'
 /** Ezber: 5 sn geri sayım, bitince otomatik tahmin. */
 const MEMORIZE_PREP_SECONDS_ENDLESS = 5
 const MEMORIZE_PREP_SECONDS_DAILY = 3
-const DAILY_ROUNDS = 5
+const DAILY_ROUNDS = 1
 
 function getDailyTargets(): Color[] {
   const d = new Date()
@@ -118,32 +118,11 @@ function getDailyTargets(): Color[] {
 
   const targets: Color[] = []
 
+  // Daily: tek hedef renk
   targets.push({
     r: Math.floor(pseudo(seed) * 256),
     g: Math.floor(pseudo(seed + 1) * 256),
     b: Math.floor(pseudo(seed + 2) * 256),
-  })
-
-  for (let i = 1; i <= 2; i++) {
-    targets.push({
-      r: Math.floor(pseudo(seed + i * 10) * 256),
-      g: Math.floor(pseudo(seed + i * 10 + 1) * 256),
-      b: Math.floor(pseudo(seed + i * 10 + 2) * 256),
-    })
-  }
-
-  const base4 = Math.floor(pseudo(seed + 40) * 200) + 28
-  targets.push({
-    r: Math.min(255, Math.max(0, base4 + Math.floor(pseudo(seed + 41) * 40) - 20)),
-    g: Math.min(255, Math.max(0, base4 + Math.floor(pseudo(seed + 42) * 40) - 20)),
-    b: Math.min(255, Math.max(0, base4 + Math.floor(pseudo(seed + 43) * 40) - 20)),
-  })
-
-  const base5 = Math.floor(pseudo(seed + 50) * 180) + 40
-  targets.push({
-    r: Math.min(255, Math.max(0, base5 + Math.floor(pseudo(seed + 51) * 20) - 10)),
-    g: Math.min(255, Math.max(0, base5 + Math.floor(pseudo(seed + 52) * 20) - 10)),
-    b: Math.min(255, Math.max(0, base5 + Math.floor(pseudo(seed + 53) * 20) - 10)),
   })
 
   return targets
@@ -260,6 +239,20 @@ function ColorPicker({ onChange }: { onChange: (c: Color) => void }) {
           cursor: 'pointer',
           touchAction: 'none',
         }}
+        onTouchStart={(e) => {
+          e.preventDefault()
+          applyHueClientX(e.touches[0].clientX)
+        }}
+        onTouchMove={(e) => {
+          e.preventDefault()
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+          const clientX = e.touches[0].clientX
+          const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+          const h = Math.round(x * 360)
+          const { s, v } = svRef.current
+          setHue(h)
+          update(s, v, h)
+        }}
         onPointerDown={(e) => {
           if (e.pointerType === 'mouse' && e.button !== 0) return
           ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
@@ -302,11 +295,14 @@ function ColorPicker({ onChange }: { onChange: (c: Color) => void }) {
           onMouseMove={e => { if (dragging.current) handleCanvas(e) }}
           onMouseUp={() => { dragging.current = false }}
           onMouseLeave={() => { dragging.current = false }}
-          onTouchStart={e => { dragging.current = true; handleCanvas(e) }}
-          onTouchMove={(e) => {
-            if (!dragging.current) return
+          onTouchStart={e => {
             e.preventDefault()
+            dragging.current = true
             handleCanvas(e)
+          }}
+          onTouchMove={e => {
+            e.preventDefault()
+            if (dragging.current) handleCanvas(e)
           }}
           onTouchEnd={() => { dragging.current = false }}
           onTouchCancel={() => { dragging.current = false }}
@@ -351,10 +347,53 @@ function RengiHatirlaContent() {
   const [timer, setTimer] = useState(MEMORIZE_PREP_SECONDS_ENDLESS)
   const [answerAnim, setAnswerAnim] = useState<'correct' | 'wrong' | null>(null)
   const [displayScore, setDisplayScore] = useState(0)
+  const [isMobile, setIsMobile] = useState(false)
+  const pushedRef = useRef(false)
+  const modeRef = useRef<Mode | null>(mode)
+
+  useEffect(() => { modeRef.current = mode }, [mode])
   const dailyStreak = readStreak()
   const memorizeTime = mode === 'daily' ? MEMORIZE_PREP_SECONDS_DAILY : MEMORIZE_PREP_SECONDS_ENDLESS
 
   useEffect(() => { setTimeout(() => setMounted(true), 50) }, [])
+
+  // Browser back/gesture while in-game -> return to mode/difficulty menu instead of home
+  useEffect(() => {
+    if (mode != null && !pushedRef.current) {
+      try { window.history.pushState({ renkle: 'rengi-hatirla-playing' }, '') } catch { /* ignore */ }
+      pushedRef.current = true
+    }
+    if (mode == null) pushedRef.current = false
+  }, [mode])
+
+  useEffect(() => {
+    const onPop = () => {
+      if (modeRef.current == null) return
+      setMode(null)
+      setPhase('memorize')
+      setSimilarity(null)
+      setGuessPicked(false)
+      try { window.history.pushState({ renkle: 'rengi-hatirla-menu' }, '') } catch { /* ignore */ }
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 520px)')
+    const update = () => setIsMobile(mq.matches)
+    update()
+    try {
+      mq.addEventListener('change', update)
+      return () => mq.removeEventListener('change', update)
+    } catch {
+      // Safari fallback
+      // eslint-disable-next-line deprecation/deprecation
+      mq.addListener(update)
+      // eslint-disable-next-line deprecation/deprecation
+      return () => mq.removeListener(update)
+    }
+  }, [])
 
   useEffect(() => {
     if (!mode || phase !== 'memorize') return undefined
@@ -609,7 +648,7 @@ function RengiHatirlaContent() {
       memorize: 'rengi ezberle', guess: 'tahminde bulun', result: 'sonuç',
       submit: 'tahmin et', next: 'sonraki renk',
       target: 'hedef', yours: 'senin', best: 'en iyi', streak: 'seri',
-      avg: 'ort.', share: 'paylaş', nextColor: 'yeni renge', home: 'ana sayfa',
+      avg: 'ort.', share: 'kopyala', nextColor: 'yeni renge', home: 'ana sayfa',
       alreadyPlayed: 'Bugünü oynadın!', perfect: 'mükemmel!',
       good: 'iyi!', tryAgain: 'tekrar dene', backToMenu: 'mod seç',
       dailyDoneTitle: 'bugünlük tamam.', newColorCountdown: 'yeni renk:',
@@ -624,7 +663,7 @@ function RengiHatirlaContent() {
       memorize: 'memorize the color', guess: 'make your guess', result: 'result',
       submit: 'submit', next: 'next color',
       target: 'target', yours: 'yours', best: 'best', streak: 'streak',
-      avg: 'avg.', share: 'share', nextColor: 'next color in', home: 'home',
+      avg: 'avg.', share: 'copy', nextColor: 'next color in', home: 'home',
       alreadyPlayed: 'Already played today!', perfect: 'perfect!',
       good: 'good!', tryAgain: 'try again', backToMenu: 'choose mode',
       dailyDoneTitle: 'all done for today.', newColorCountdown: 'new color:',
@@ -639,10 +678,10 @@ function RengiHatirlaContent() {
   const helpFabAria = lang === 'tr' ? 'nasıl oynanır' : 'how to play'
   const helpFabSteps = helpIsDaily
     ? (lang === 'tr' ? [
-        { text: '5 farklı renk sırayla gösterilir.' },
+        { text: 'günde 1 renk gösterilir.' },
         { text: 'Her rengi 3 saniyede ezberle.' },
         { text: 'Renk seçiciyle aynısını bul.' },
-        { text: '5 turun ortalaması skorun olur.' },
+        { text: 'skorun, bu rengin benzerlik oranıdır.' },
       ] : [
         { text: 'Five different colors are shown in order.' },
         { text: 'Memorize each color in 3 seconds.' },
@@ -758,7 +797,7 @@ function RengiHatirlaContent() {
               </div>
             </div>
 
-            <div style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: 12, textAlign: 'center' }}>
               <div style={{
                 fontSize: 18, fontWeight: 500,
                 color: 'var(--text-primary)',
@@ -786,6 +825,7 @@ function RengiHatirlaContent() {
                   borderRadius: 12,
                   padding: 4,
                   display: 'flex',
+                  flexDirection: isMobile ? 'column' : 'row',
                   gap: 3,
                   border: '0.5px solid var(--border)',
                 }}
@@ -807,8 +847,9 @@ function RengiHatirlaContent() {
                         }
                       }}
                       style={{
-                        flex: 1,
-                        padding: '10px 0',
+                        flex: isMobile ? 'none' : 1,
+                        width: isMobile ? '100%' : undefined,
+                        padding: isMobile ? '10px 12px' : '10px 0',
                         borderRadius: 9,
                         textAlign: 'center',
                         cursor: 'pointer',
@@ -817,19 +858,21 @@ function RengiHatirlaContent() {
                           ? '0.5px solid var(--border-mid)'
                           : '0.5px solid transparent',
                         transition: 'all 0.15s',
+                        minHeight: 56,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                       }}
                     >
                       <div style={{
-                        fontSize: 12,
+                        fontSize: 13,
                         color: difficulty === d ? 'var(--text-primary)' : 'var(--text-tertiary)',
-                        fontWeight: difficulty === d ? 500 : 400,
-                        marginBottom: 2,
+                        fontWeight: difficulty === d ? 600 : 500,
+                        letterSpacing: '-0.2px',
+                        lineHeight: 1.2,
                       }}
                       >
-                        {diffLabel[d][lang]}
-                      </div>
-                      <div style={{ fontSize: 9, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                        {sub[lang]}
+                        {diffLabel[d][lang]}, {sub[lang]}
                       </div>
                     </div>
                   ))}
@@ -843,6 +886,11 @@ function RengiHatirlaContent() {
                   padding: '14px 12px',
                   border: '0.5px solid var(--border)',
                   flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
                 }}
                 >
                   <div style={{ fontSize: 26, fontWeight: 500, color: 'var(--text-primary)', letterSpacing: '-1px', marginBottom: 6, lineHeight: 1 }}>∞</div>
@@ -856,6 +904,11 @@ function RengiHatirlaContent() {
                   padding: '14px 12px',
                   border: '0.5px solid var(--border)',
                   flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
                 }}
                 >
                   <div style={{ fontSize: 26, fontWeight: 500, color: 'var(--text-primary)', letterSpacing: '-1px', marginBottom: 6, lineHeight: 1 }}>5s</div>
@@ -869,6 +922,11 @@ function RengiHatirlaContent() {
                   padding: '14px 12px',
                   border: '0.5px solid var(--border)',
                   flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
                 }}
                 >
                   <div style={{ fontSize: 26, fontWeight: 500, color: 'var(--text-primary)', letterSpacing: '-1px', marginBottom: 6, lineHeight: 1 }}>%</div>
@@ -1226,7 +1284,7 @@ function RengiHatirlaContent() {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                     <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#a8e063' }} />
-                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.1px' }}>
                       {dailyStreak} {lang === 'tr' ? 'günlük seri' : 'day streak'}
                     </span>
                   </div>
@@ -1343,23 +1401,14 @@ function RengiHatirlaContent() {
                   </p>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8, width: '100%' }}>
                   <button
                     className="btn-press"
                     type="button"
                     onClick={nextRound}
-                    style={gamePrimaryButtonStyle}
+                    style={{ ...gamePrimaryButtonStyle, width: '100%' }}
                   >
                     {t.next}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleShare}
-                    style={gameSecondaryButtonStyle}
-                  >
-                    {copied
-                      ? (lang === 'tr' ? 'kopyalandı ✓' : 'copied ✓')
-                      : t.share}
                   </button>
                 </div>
 

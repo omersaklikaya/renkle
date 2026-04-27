@@ -15,14 +15,14 @@ const boot = `
     }
     document.documentElement.dataset.theme = theme;
 
-    var href = theme === 'dark' ? ${JSON.stringify(SITE_THEME_ICONS.dark)} : ${JSON.stringify(SITE_THEME_ICONS.light)};
-    var link = document.querySelector('link[rel="icon"][data-renkle-icon]');
+    var href = (theme === 'dark' ? ${JSON.stringify(SITE_THEME_ICONS.dark)} : ${JSON.stringify(SITE_THEME_ICONS.light)}) + '?theme=' + theme;
+    var link = document.querySelector('link[rel="icon"][data-renkle-icon]') || document.querySelector('link[rel="icon"]');
     if (!link) {
       link = document.createElement('link');
       link.rel = 'icon';
-      link.setAttribute('data-renkle-icon', 'true');
       document.head.appendChild(link);
     }
+    link.setAttribute('data-renkle-icon', 'true');
     link.href = href;
   } catch (e) {
     document.documentElement.dataset.theme = ${JSON.stringify('light' satisfies SiteTheme)};
